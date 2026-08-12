@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+{% block title %}概览 - 易班签到管理{% endblock %}
+{% block content %}
+
+<!-- 统计 -->
+<div class="stats-grid">
+    <div class="stat-item"><div class="stat-value">{{ stats.total_users }}</div><div class="stat-label">启用用户</div></div>
+    <div class="stat-item"><div class="stat-value success">{{ stats.today_success }}</div><div class="stat-label">今日成功</div></div>
+    <div class="stat-item"><div class="stat-value danger">{{ stats.today_fail }}</div><div class="stat-label">今日失败</div></div>
+    <div class="stat-item"><div class="stat-value warning">{{ stats.today_rate }}</div><div class="stat-label">今日成功率</div></div>
+    <div class="stat-item"><div class="stat-value">{{ stats.week_success }}</div><div class="stat-label">7日成功</div></div>
+    <div class="stat-item"><div class="stat-value">{{ stats.week_fail }}</div><div class="stat-label">7日失败</div></div>
+</div>
+
+<!-- 操作面板 -->
+<div class="card">
+    <h2>快捷操作</h2>
+    <div class="btn-group">
+        <button class="btn btn-success" onclick="triggerSign()">🚀 全部签到</button>
+        <button class="btn btn-warning" onclick="triggerSign(null, true)">🧪 测试登录</button>
+        <button class="btn btn-primary" onclick="syncUsers()">🔄 同步用户</button>
+        <a href="{{ url_for('add_user') }}" class="btn btn-primary">➕ 添加用户</a>
+        <a href="{{ url_for('import_users') }}" class="btn btn-secondary">📥 批量导入</a>
+    </div>
+    <div id="sse-log" style="margin-top:12px;display:none;"></div>
+    <div id="sse-summary" style="margin-top:8px;"></div>
+</div>
+
+<!-- 用户列表 -->
+<div class="card">
+    <div class="toolbar">
+        <h2 style="margin:0">用户（{{ users|length }}）</h2>
+        <div class="btn-group">
+            <input type="text" id="quickSearch" placeholder="搜索手机号/QQ" style="width:180px" onkeydown="if(event.key==='Enter')searchUser()">
+            <button class="btn btn-sm btn-secondary" onclick="searchUser()">搜索</button>
+        </div>
+    </div>
+    <table>
+        <thead><tr><th>#</th><th>手机号</th><th>QQ</th><th>设备</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+        {% for u in users[:10] %}
+            <tr>
+                <td>{{ u.id }}</td><td>{{ u.phone }}</td><td>{{ u.qq }}</td><td>{{ u.phone_model }}</td>
+                <td><span class="badge badge-{{ 'enable' if u.enable else 'disable' }}">{{ '启用' if u.enable else '禁用' }}</span></td>
+                <td class="actions-cell">
+                    <button class="btn btn-sm btn-success" onclick="triggerSign('{{ u.phone }}')">签到</button>
+                    <button class="btn btn-sm btn-warning" onclick="triggerSign('{{ u.phone }}', true)">测试</button>
+                    <a href="{{ url_for('edit_user', phone=u.phone) }}" class="btn btn-sm btn-primary">编辑</a>
+                    <form method="post" action="{{ url_for('delete_user', phone=u.phone) }}" style="display:inline" onsubmit="return confirm('删除 {{ u.phone }}?')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-danger" type="submit">删</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        {% if users|length > 10 %}
+            <tr><td colspan="6" style="text-align:center;color:#64748b;cursor:pointer" onclick="location.href='/users'">还有 {{ users|length - 10 }} 个用户... 查看全部</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- 最近日志 -->
+<div class="card">
+    <h2>最近签到记录</h2>
+    <table>
+        <thead><tr><th>时间</th><th>手机号</th><th>状态</th><th>详情</th></tr></thead>
+        <tbody>
+        {% for log in recent_logs %}
+            <tr>
+                <td>{{ log.created_at }}</td><td>{{ log.phone }}</td>
+                <td><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
+                <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.message }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+let currentSource = null;
+
+function triggerSign(phone, testMode) {
+    if (currentSource) currentSource.close();
+    const log = document.getElementById('sse-log');
+    const summary = document.getElementById('sse-summary');
+    log.style.display = 'block';
+    log.innerHTML = '';
+    summary.innerHTML = '<span style="color:#60a5fa">执行中...</span>';
+
+    let url = '/sign/trigger?';
+    if (phone) url += 'phone=' + encodeURIComponent(phone) + '&';
+    if (testMode) url += 'test=1&';
+
+    currentSource = new EventSource(url);
+    let results = [];
+
+    currentSource.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        if (data.type === 'log') {
+            log.innerHTML += '<div class="sse-line sse-log-line">' + escapeHtml(data.message) + '</div>';
+            log.scrollTop = log.scrollHeight;
+        } else if (data.type === 'info') {
+            log.innerHTML += '<div class="sse-line sse-info">ℹ️ ' + escapeHtml(data.message) + '</div>';
+        } else if (data.type === 'error') {
+            log.innerHTML += '<div class="sse-line sse-error">❌ ' + escapeHtml(data.message) + '</div>';
+        } else if (data.type === 'done') {
+            results = data.results || [];
+            let succ = results.filter(r => r.status === 'success').length;
+            let fail = results.filter(r => r.status === 'fail').length;
+            let skip = results.filter(r => r.status === 'skip').length;
+            summary.innerHTML = `<span style="color:#34d399">✓ 成功: ${succ}</span> &nbsp; <span style="color:#f87171">✗ 失败: ${fail}</span> &nbsp; <span style="color:#fbbf24">⊘ 跳过: ${skip}</span>`;
+            currentSource.close();
+        }
+    };
+    currentSource.onerror = function() { currentSource.close(); };
+}
+
+function syncUsers() {
+    fetch('/sign/sync', {method:'POST'}).then(r=>r.json()).then(d=>{ alert(d.message); });
+}
+
+function searchUser() {
+    const q = document.getElementById('quickSearch').value.trim();
+    if (q) location.href = '/users?search=' + encodeURIComponent(q);
+}
+
+function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.secret_key
+.cookies.txt
+*.db
+debug_*.py
+migrate.py
+test_*.py
+yiban-admin.db

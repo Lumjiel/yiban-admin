@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+{% block title %}用户管理 - 易班签到管理{% endblock %}
+{% block content %}
+<div class="toolbar">
+    <h2 style="margin:0">用户管理（共 {{ total }} 人）</h2>
+    <div class="btn-group">
+        <form method="get" style="display:flex;gap:8px;">
+            <input type="text" name="search" placeholder="搜索手机号/QQ/型号" value="{{ search }}" style="width:200px;">
+            <button class="btn btn-sm btn-secondary" type="submit">搜索</button>
+            {% if search %}<a href="{{ url_for('user_list') }}" class="btn btn-sm">清除</a>{% endif %}
+        </form>
+        <a href="{{ url_for('add_user') }}" class="btn btn-sm btn-success">➕ 添加</a>
+        <a href="{{ url_for('import_users') }}" class="btn btn-sm btn-primary">📥 批量导入</a>
+        <a href="{{ url_for('export_users') }}" class="btn btn-sm btn-secondary">📤 导出</a>
+    </div>
+</div>
+
+<form method="post" action="{{ url_for('batch_delete_users') }}" id="batchForm" onsubmit="return confirm('确定删除选中的用户？')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+<div class="card" style="padding:0;overflow:hidden;">
+    <table>
+        <thead>
+            <tr>
+                <th style="width:36px"><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
+                <th>#</th>
+                <th>手机号</th>
+                <th>QQ</th>
+                <th>设备型号</th>
+                <th>Server酱</th>
+                <th>状态</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for u in users %}
+            <tr>
+                <td><input type="checkbox" name="phones" value="{{ u.phone }}" class="row-check"></td>
+                <td>{{ u.id }}</td>
+                <td>{{ u.phone }}</td>
+                <td>{{ u.qq }}</td>
+                <td>{{ u.phone_model }}</td>
+                <td>{% if u.sendkey %}✓{% else %}—{% endif %}</td>
+                <td><span class="badge badge-{{ 'enable' if u.enable else 'disable' }}">{{ '启用' if u.enable else '禁用' }}</span></td>
+                <td class="actions-cell">
+                    <button class="btn btn-sm btn-success" onclick="triggerSign('{{ u.phone }}');return false;">签到</button>
+                    <button class="btn btn-sm btn-warning" onclick="triggerSign('{{ u.phone }}', true);return false;">测试</button>
+                    <a href="{{ url_for('edit_user', phone=u.phone) }}" class="btn btn-sm btn-primary">编辑</a>
+                    <form method="post" action="{{ url_for('delete_user', phone=u.phone) }}" style="display:inline" onsubmit="return confirm('删除 {{ u.phone }}?')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-danger" type="submit">删</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        {% if not users %}
+            <tr><td colspan="8" class="empty">{% if search %}没有匹配的用户{% else %}暂无用户{% endif %}</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+</div>
+
+{% if users %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
+    <div class="btn-group">
+        <button class="btn btn-sm btn-danger" type="submit" form="batchForm" onclick="return $('.row-check:checked').length>0">🗑️ 删除选中</button>
+    </div>
+    <!-- 分页 -->
+    <div class="btn-group">
+        {% if cur_page > 1 %}
+            <a href="?page={{ cur_page-1 }}&search={{ search }}" class="btn btn-sm btn-secondary">← 上一页</a>
+        {% endif %}
+        <span style="padding:8px 12px;color:#64748b;font-size:13px">{{ cur_page }} / {{ pages }}</span>
+        {% if cur_page < pages %}
+            <a href="?page={{ cur_page+1 }}&search={{ search }}" class="btn btn-sm btn-secondary">下一页 →</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+</form>
+
+<!-- SSE 日志区域 -->
+<div id="sse-log" style="margin-top:16px;display:none;" class="card"></div>
+
+<script>
+function toggleAll(cb) {
+    document.querySelectorAll('.row-check').forEach(c => c.checked = cb.checked);
+}
+
+let currentSource = null;
+function triggerSign(phone, testMode) {
+    if (currentSource) currentSource.close();
+    const log = document.getElementById('sse-log');
+    log.style.display = 'block';
+    log.innerHTML = '<pre style="margin:0;background:transparent;border:none;padding:0">执行中...</pre>';
+
+    let url = '/sign/trigger?';
+    if (phone) url += 'phone=' + encodeURIComponent(phone) + '&';
+    if (testMode) url += 'test=1&';
+
+    currentSource = new EventSource(url);
+    let results = [];
+
+    currentSource.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        if (data.type === 'log') {
+            log.querySelector('pre').innerHTML += escapeHtml(data.message) + '\n';
+        } else if (data.type === 'info') {
+            log.querySelector('pre').innerHTML += 'ℹ️ ' + escapeHtml(data.message) + '\n';
+        } else if (data.type === 'error') {
+            log.querySelector('pre').innerHTML += '❌ ' + escapeHtml(data.message) + '\n';
+        } else if (data.type === 'done') {
+            results = data.results || [];
+            let succ = results.filter(r => r.status === 'success').length;
+            let fail = results.filter(r => r.status === 'fail').length;
+            log.querySelector('pre').innerHTML += `\n--- 完成: 成功 ${succ}, 失败 ${fail} ---\n`;
+            currentSource.close();
+        }
+    };
+    currentSource.onerror = function() { currentSource.close(); };
+}
+
+function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+</script>
+{% endblock %}

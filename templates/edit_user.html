@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block title %}编辑用户 - 易班签到管理{% endblock %}
+{% block content %}
+<div class="card" style="max-width:700px;">
+    <h2>编辑用户：{{ user.phone }}</h2>
+    <form method="post">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+            <div>
+                <label>手机号</label>
+                <input type="text" value="{{ user.phone }}" disabled style="opacity:0.5;background:#0f172a;color:#fff;border:1px solid #334155">
+            </div>
+            <div>
+                <label>QQ号</label>
+                <input type="text" name="qq" value="{{ user.qq }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+            </div>
+            <div>
+                <label>密码</label>
+                <input type="text" name="password" value="{{ user.password }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+            </div>
+            <div>
+                <label>手机型号</label>
+                <input type="text" name="phone_model" id="phoneModel" list="phoneModels" value="{{ user.phone_model }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+                <datalist id="phoneModels">
+                    <option value="iPhone-16-Pro-Max">
+                    <option value="iPhone-16-Pro">
+                    <option value="iPhone-15-Pro-Max">
+                    <option value="iPhone-15-Pro">
+                    <option value="iPhone-14-Pro-Max">
+                    <option value="Vivo-V2359A">
+                    <option value="Vivo-X100-Pro">
+                    <option value="Xiaomi-14-Ultra">
+                    <option value="Xiaomi-13-Pro">
+                    <option value="OPPO-Find-X7-Ultra">
+                    <option value="Samsung-S24-Ultra">
+                    <option value="Huawei-Mate-60-Pro">
+                    <option value="OnePlus-12">
+                    <option value="Honor-Magic6-Pro">
+                </datalist>
+            </div>
+            <div>
+                <label>设备ID</label>
+                <input type="text" name="device_id" value="{{ user.device_id }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+            </div>
+            <div>
+                <label>Server酱 SendKey</label>
+                <input type="text" name="sendkey" value="{{ user.sendkey }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+            </div>
+        </div>
+        <div style="margin-top:16px;">
+            <label>签到地址</label>
+            <textarea name="address" rows="2" style="background:#0f172a;color:#fff;border:1px solid #334155">{{ user.address }}</textarea>
+        </div>
+        <div class="btn-group" style="margin-top:20px;">
+            <button type="submit" class="btn btn-success">保存</button>
+            <a href="{{ url_for('user_list') }}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

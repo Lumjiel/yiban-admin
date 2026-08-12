@@ -1,0 +1,546 @@
+import sqlite3
+import os
+import csv
+import io
+import json
+import hashlib
+import secrets
+import re
+import uuid
+from datetime import datetime, timedelta
+from typing import Optional
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yiban-admin.db")
+
+# 固定 secret_key（从文件读取，不存在则生成）
+SECRET_KEY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".secret_key")
+
+def get_secret_key() -> str:
+    if os.path.exists(SECRET_KEY_PATH):
+        with open(SECRET_KEY_PATH, 'r') as f:
+            return f.read().strip()
+    key = secrets.token_hex(32)
+    with open(SECRET_KEY_PATH, 'w') as f:
+        f.write(key)
+    return key
+
+
+def get_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone TEXT UNIQUE NOT NULL,
+            qq TEXT NOT NULL,
+            password TEXT NOT NULL,
+            sendkey TEXT DEFAULT '',
+            address TEXT DEFAULT '',
+            device_id TEXT DEFAULT '',
+            phone_model TEXT DEFAULT 'iPhone-15-Pro-Max',
+            enable INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS sign_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('success', 'fail', 'skip')),
+            message TEXT DEFAULT '',
+            batch_id TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS admin_config (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            username TEXT NOT NULL DEFAULT 'admin',
+            password_hash TEXT NOT NULL DEFAULT '',
+            salt TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS notify_config (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            qq TEXT DEFAULT '',
+            auth_code TEXT DEFAULT '',
+            email_enable INTEGER DEFAULT 1,
+            serverchan_key TEXT DEFAULT '',
+            serverchan_enable INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL,
+            detail TEXT DEFAULT '',
+            ip TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT NOT NULL,
+            username TEXT DEFAULT '',
+            success INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sign_logs_phone ON sign_logs(phone);
+        CREATE INDEX IF NOT EXISTS idx_sign_logs_created ON sign_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_sign_logs_batch ON sign_logs(batch_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
+        CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip);
+    """)
+
+    # 确保 admin 存在（只在为空时创建默认账户）
+    row = conn.execute("SELECT * FROM admin_config WHERE id = 1").fetchone()
+    if not row or not row['password_hash']:
+        salt = secrets.token_hex(16)
+        pw_hash = _hash_password('admin123', salt)
+        conn.execute("""INSERT OR REPLACE INTO admin_config (id, username, password_hash, salt)
+                        VALUES (1, 'admin', ?, ?)""", (pw_hash, salt))
+
+    conn.execute("INSERT OR IGNORE INTO notify_config (id) VALUES (1)")
+    conn.commit()
+    conn.close()
+
+
+# ========== 密码哈希 ==========
+
+def _hash_password(password: str, salt: str) -> str:
+    """SHA256 + 盐，迭代 10000 次"""
+    key = (password + salt).encode('utf-8')
+    for _ in range(10000):
+        key = hashlib.sha256(key).digest()
+    return key.hex()
+
+
+def verify_admin(username: str, password: str) -> bool:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM admin_config WHERE id = 1 AND username = ?", (username,)).fetchone()
+    conn.close()
+    if not row or not row['password_hash']:
+        return False
+    return _hash_password(password, row['salt']) == row['password_hash']
+
+
+def change_admin_password(old_pw: str, new_pw: str) -> tuple:
+    if not verify_admin(get_admin_username(), old_pw):
+        return False, "原密码错误"
+    if len(new_pw) < 4:
+        return False, "密码长度至少 4 位"
+    new_salt = secrets.token_hex(16)
+    new_hash = _hash_password(new_pw, new_salt)
+    conn = get_db()
+    conn.execute("UPDATE admin_config SET password_hash = ?, salt = ?, updated_at = ? WHERE id = 1",
+                 (new_hash, new_salt, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    conn.commit()
+    conn.close()
+    return True, "密码修改成功"
+
+
+def get_admin_username() -> str:
+    conn = get_db()
+    row = conn.execute("SELECT username FROM admin_config WHERE id = 1").fetchone()
+    conn.close()
+    return row['username'] if row else 'admin'
+
+
+# ========== 输入过滤 ==========
+
+def sanitize_str(value: str, max_len: int = 100) -> str:
+    """过滤危险字符，防止注入"""
+    if not value:
+        return ''
+    # 移除换行、单引号、双引号、反斜杠
+    value = value.replace('\n', '').replace('\r', '').replace("'", '').replace('"', '').replace('\\', '')
+    # 移除控制字符
+    value = re.sub(r'[\x00-\x1f\x7f]', '', value)
+    return value[:max_len]
+
+
+def validate_address(addr: str) -> tuple:
+    """校验签到地址 JSON 格式"""
+    if not addr:
+        return True, ''
+    try:
+        data = json.loads(addr)
+        if not isinstance(data, dict):
+            return False, "签到地址必须是 JSON 对象"
+        return True, ''
+    except json.JSONDecodeError:
+        return False, "签到地址格式错误：无效的 JSON"
+
+
+def gen_device_id() -> str:
+    """生成随机设备ID"""
+    return str(uuid.uuid4())
+
+
+# ========== 审计日志 ==========
+
+def add_audit_log(action: str, detail: str = '', ip: str = ''):
+    conn = get_db()
+    conn.execute("INSERT INTO audit_log (action, detail, ip) VALUES (?, ?, ?)",
+                 (action, detail, ip))
+    conn.commit()
+    conn.close()
+
+
+def get_audit_logs(limit: int = 50) -> list:
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    return rows
+
+
+# ========== 登录限流 ==========
+
+def check_login_rate_limit(ip: str) -> tuple:
+    """检查是否被限流，返回 (是否允许, 剩余等待秒数)"""
+    conn = get_db()
+    # 15 分钟内失败次数
+    since = (datetime.now() - timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
+    fails = conn.execute(
+        "SELECT COUNT(*) FROM login_attempts WHERE ip = ? AND success = 0 AND created_at >= ?",
+        (ip, since)).fetchone()[0]
+    conn.close()
+    if fails >= 5:
+        return False, 900  # 锁定 15 分钟
+    return True, 0
+
+
+def record_login_attempt(ip: str, username: str, success: bool):
+    conn = get_db()
+    conn.execute("INSERT INTO login_attempts (ip, username, success) VALUES (?, ?, ?)",
+                 (ip, username, 1 if success else 0))
+    conn.commit()
+    # 清理 24 小时前的记录
+    old = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute("DELETE FROM login_attempts WHERE created_at < ?", (old,))
+    conn.close()
+
+
+# ========== User CRUD ==========
+
+def get_all_users() -> list:
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM users ORDER BY id ASC").fetchall()
+    conn.close()
+    return rows
+
+
+def get_users_page(page: int = 1, per_page: int = 20, search: str = '') -> tuple:
+    conn = get_db()
+    where = ""
+    params = []
+    if search:
+        where = "WHERE phone LIKE ? OR qq LIKE ? OR phone_model LIKE ?"
+        params = [f'%{search}%', f'%{search}%', f'%{search}%']
+
+    total = conn.execute(f"SELECT COUNT(*) FROM users {where}", params).fetchone()[0]
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, pages))
+    offset = (page - 1) * per_page
+
+    rows = conn.execute(
+        f"SELECT * FROM users {where} ORDER BY id ASC LIMIT ? OFFSET ?",
+        params + [per_page, offset]
+    ).fetchall()
+    conn.close()
+    return pages, page, total, rows
+
+
+def get_user(phone: str) -> Optional[sqlite3.Row]:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM users WHERE phone = ?", (phone,)).fetchone()
+    conn.close()
+    return row
+
+
+def add_user(phone, qq, password, sendkey='', address='', device_id='', phone_model='iPhone-15-Pro-Max') -> tuple:
+    # 输入过滤
+    phone = sanitize_str(phone, 11)
+    qq = sanitize_str(qq, 20)
+    phone_model = sanitize_str(phone_model, 50)
+    sendkey = sanitize_str(sendkey, 100)
+    device_id = sanitize_str(device_id, 50)
+
+    # 校验
+    if not phone or not re.match(r'^\d{11}$', phone):
+        return False, "手机号必须是 11 位数字"
+    if not qq:
+        return False, "QQ号不能为空"
+    if not password:
+        return False, "密码不能为空"
+
+    # 校验 address JSON
+    if address:
+        ok, msg = validate_address(address)
+        if not ok:
+            return False, msg
+    else:
+        address = '{"Reason":"","AttachmentFileName":"","LngLat":"118.88,31.93","Address":""}'
+
+    # 空 device_id 自动生成
+    if not device_id:
+        device_id = gen_device_id()
+
+    conn = get_db()
+    try:
+        conn.execute("""INSERT INTO users (phone, qq, password, sendkey, address, device_id, phone_model)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                     (phone, qq, password, sendkey, address, device_id, phone_model))
+        conn.commit()
+        return True, "添加成功"
+    except sqlite3.IntegrityError:
+        return False, f"手机号 {phone} 已存在"
+    finally:
+        conn.close()
+
+
+def batch_add_users(users: list) -> tuple:
+    conn = get_db()
+    success = 0
+    failed = []
+    for u in users:
+        try:
+            phone = sanitize_str(str(u.get('phone', '')), 11)
+            qq = sanitize_str(str(u.get('qq', '')), 20)
+            password = str(u.get('password', ''))
+            sendkey = sanitize_str(str(u.get('sendkey', '')), 100)
+            address = str(u.get('address', ''))
+            device_id = sanitize_str(str(u.get('device_id', '')), 50)
+            phone_model = sanitize_str(str(u.get('phone_model', 'iPhone-15-Pro-Max')), 50)
+
+            if not phone or not re.match(r'^\d{11}$', phone):
+                failed.append(f"{phone}: 手机号格式错误")
+                continue
+            if not password:
+                failed.append(f"{phone}: 密码为空")
+                continue
+            if address:
+                ok, msg = validate_address(address)
+                if not ok:
+                    failed.append(f"{phone}: {msg}")
+                    continue
+            else:
+                address = '{"Reason":"","AttachmentFileName":"","LngLat":"118.88,31.93","Address":""}'
+            if not device_id:
+                device_id = gen_device_id()
+
+            conn.execute("""INSERT INTO users (phone, qq, password, sendkey, address, device_id, phone_model)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                         (phone, qq, password, sendkey, address, device_id, phone_model))
+            success += 1
+        except sqlite3.IntegrityError:
+            failed.append(f"{phone} 已存在")
+        except Exception as e:
+            failed.append(f"{phone}: {str(e)}")
+    conn.commit()
+    conn.close()
+    return success, failed
+
+
+def update_user(phone: str, **kwargs) -> tuple:
+    allowed = {'qq', 'password', 'sendkey', 'address', 'device_id', 'phone_model', 'enable'}
+    fields = {}
+    for k, v in kwargs.items():
+        if k in allowed:
+            fields[k] = sanitize_str(str(v), 100) if isinstance(v, str) else v
+
+    if not fields:
+        return False, "无有效字段"
+
+    # 校验 address
+    if 'address' in fields and fields['address']:
+        ok, msg = validate_address(fields['address'])
+        if not ok:
+            return False, msg
+
+    fields['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [phone]
+    conn = get_db()
+    conn.execute(f"UPDATE users SET {set_clause} WHERE phone = ?", values)
+    conn.commit()
+    conn.close()
+    return True, "更新成功"
+
+
+def delete_user(phone: str):
+    conn = get_db()
+    conn.execute("DELETE FROM users WHERE phone = ?", (phone,))
+    conn.commit()
+    conn.close()
+
+
+def batch_delete_users(phones: list):
+    conn = get_db()
+    for p in phones:
+        conn.execute("DELETE FROM users WHERE phone = ?", (p,))
+    conn.commit()
+    conn.close()
+
+
+def toggle_user(phone: str):
+    conn = get_db()
+    conn.execute("UPDATE users SET enable = NOT enable WHERE phone = ?", (phone,))
+    conn.commit()
+    conn.close()
+
+
+def export_users_json() -> str:
+    users = get_all_users()
+    data = []
+    for u in users:
+        data.append({
+            'phone': u['phone'], 'qq': u['qq'], 'password': u['password'],
+            'sendkey': u['sendkey'], 'address': u['address'],
+            'device_id': u['device_id'], 'phone_model': u['phone_model'],
+            'enable': bool(u['enable'])
+        })
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def parse_import_csv(content: str) -> list:
+    reader = csv.DictReader(io.StringIO(content))
+    users = []
+    for row in reader:
+        if 'phone' in row:
+            u = {'phone': row.get('phone', '').strip(), 'qq': row.get('qq', '').strip(),
+                 'password': row.get('password', '').strip(), 'sendkey': row.get('sendkey', '').strip(),
+                 'address': row.get('address', '').strip(), 'device_id': row.get('device_id', '').strip(),
+                 'phone_model': row.get('phone_model', 'iPhone-15-Pro-Max').strip()}
+        elif 'Phone' in row:
+            u = {'phone': row.get('Phone', '').strip(), 'qq': row.get('QQ', '').strip(),
+                 'password': row.get('PassWord', '').strip(), 'sendkey': row.get('SendKey', '').strip(),
+                 'address': row.get('Address', '').strip(), 'device_id': row.get('DeviceID', '').strip(),
+                 'phone_model': row.get('PhoneModel', 'iPhone-15-Pro-Max').strip()}
+        else:
+            continue
+        if u['phone'] and u['password']:
+            users.append(u)
+    return users
+
+
+def parse_import_json(content: str) -> list:
+    data = json.loads(content)
+    users = []
+    for item in data:
+        u = {'phone': str(item.get('phone', item.get('Phone', ''))).strip(),
+             'qq': str(item.get('qq', item.get('QQ', ''))).strip(),
+             'password': str(item.get('password', item.get('PassWord', ''))).strip(),
+             'sendkey': str(item.get('sendkey', item.get('SendKey', ''))).strip(),
+             'address': str(item.get('address', item.get('Address', ''))).strip(),
+             'device_id': str(item.get('device_id', item.get('DeviceID', ''))).strip(),
+             'phone_model': str(item.get('phone_model', item.get('PhoneModel', 'iPhone-15-Pro-Max'))).strip()}
+        if u['phone'] and u['password']:
+            users.append(u)
+    return users
+
+
+# ========== 通知配置 ==========
+
+def get_notify_config() -> Optional[sqlite3.Row]:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM notify_config WHERE id = 1").fetchone()
+    conn.close()
+    return row
+
+
+def set_notify_config(qq: str, auth_code: str, email_enable: int = 1,
+                      serverchan_key: str = '', serverchan_enable: int = 0):
+    conn = get_db()
+    conn.execute("""INSERT OR REPLACE INTO notify_config (id, qq, auth_code, email_enable, serverchan_key, serverchan_enable)
+                    VALUES (1, ?, ?, ?, ?, ?)""",
+                 (qq, auth_code, email_enable, serverchan_key, serverchan_enable))
+    conn.commit()
+    conn.close()
+
+
+# ========== Sign Logs ==========
+
+def add_sign_log(phone: str, status: str, message: str = '', batch_id: str = ''):
+    conn = get_db()
+    conn.execute("INSERT INTO sign_logs (phone, status, message, batch_id) VALUES (?, ?, ?, ?)",
+                 (phone, status, message, batch_id))
+    conn.commit()
+    conn.close()
+
+
+def get_recent_logs(limit: int = 100) -> list:
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM sign_logs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    return rows
+
+
+def get_logs_by_phone(phone: str, limit: int = 30) -> list:
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM sign_logs WHERE phone = ? ORDER BY id DESC LIMIT ?",
+                        (phone, limit)).fetchall()
+    conn.close()
+    return rows
+
+
+def get_logs_by_date(date_str: str) -> list:
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM sign_logs WHERE created_at LIKE ? ORDER BY id ASC",
+                        (f"{date_str}%",)).fetchall()
+    conn.close()
+    return rows
+
+
+def get_date_stats(days: int = 30) -> list:
+    conn = get_db()
+    start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    rows = conn.execute("""
+        SELECT DATE(created_at) as date,
+               COUNT(DISTINCT CASE WHEN status='success' THEN phone END) as success,
+               COUNT(DISTINCT CASE WHEN status='fail' THEN phone END) as fail,
+               COUNT(DISTINCT phone) as total
+        FROM sign_logs WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY date ASC
+    """, (start,)).fetchall()
+    conn.close()
+    return rows
+
+
+# ========== Stats ==========
+
+def get_stats() -> dict:
+    conn = get_db()
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    total_users = conn.execute("SELECT COUNT(*) FROM users WHERE enable = 1").fetchone()[0]
+    total_all = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+    today_success = conn.execute(
+        "SELECT COUNT(DISTINCT phone) FROM sign_logs WHERE status='success' AND created_at >= ?",
+        (today,)).fetchone()[0]
+    today_fail = conn.execute(
+        "SELECT COUNT(DISTINCT phone) FROM sign_logs WHERE status='fail' AND created_at >= ?",
+        (today,)).fetchone()[0]
+
+    last_7d = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    week_stats = conn.execute(
+        "SELECT status, COUNT(DISTINCT phone) as cnt FROM sign_logs WHERE created_at >= ? GROUP BY status",
+        (last_7d,)).fetchall()
+
+    conn.close()
+
+    week_success = sum(r['cnt'] for r in week_stats if r['status'] == 'success')
+    week_fail = sum(r['cnt'] for r in week_stats if r['status'] == 'fail')
+    rate = f"{(today_success / total_users * 100):.1f}%" if total_users > 0 else "0%"
+
+    return {
+        "total_users": total_users, "total_all": total_all,
+        "today_success": today_success, "today_fail": today_fail,
+        "today_rate": rate, "week_success": week_success, "week_fail": week_fail,
+    }

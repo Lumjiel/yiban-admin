@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}签到日历 - 易班签到管理{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>最近 30 天签到热力图</h2>
+    <div style="margin-bottom:12px;font-size:13px;color:#64748b;">
+        {% if date_stats %}
+        共 {{ date_stats|length }} 天有签到记录
+        {% else %}
+        暂无签到数据
+        {% endif %}
+    </div>
+    {% if date_stats %}
+    <table style="width:auto;">
+        <thead><tr><th>日期</th><th>成功</th><th>失败</th><th>成功率</th></tr></thead>
+        <tbody>
+        {% for d in date_stats|reverse %}
+        <tr style="cursor:pointer;" onclick="location.href='/calendar/date/{{ d.date }}'" title="查看详情">
+            <td>{{ d.date }}</td>
+            <td><span style="color:#34d399">{{ d.success }}</span></td>
+            <td><span style="color:#f87171">{{ d.fail }}</span></td>
+            <td>
+                {% if d.total > 0 %}
+                    {% set rate = (d.success / d.total * 100)|round(0)|int %}
+                    <span class="badge badge-{{ 'success' if rate >= 80 else 'warning' if rate >= 50 else 'fail' }}">{{ rate }}%</span>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">暂无数据，先去签到一次吧</div>
+    {% endif %}
+</div>
+{% endblock %}

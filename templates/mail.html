@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+{% block title %}通知配置 - 易班签到管理{% endblock %}
+{% block content %}
+<div class="card" style="max-width:500px;">
+    <h2>📧 QQ 邮件通知</h2>
+    <p style="color:#64748b;font-size:13px;margin-bottom:16px;">
+        每个用户签到结果会通过 QQ 邮件单独通知。第一个用户（你自己）还会收到汇总通知。
+    </p>
+    <form method="post">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label>QQ号</label>
+        <input type="text" name="qq" value="{{ notify.qq if notify else '' }}" placeholder="3465937769"
+               autocomplete="off" style="background:#0f172a;color:#fff;border:1px solid #334155">
+        <label>SMTP 授权码</label>
+        <input type="text" name="auth_code" value="{{ notify.auth_code if notify else '' }}" placeholder="ocvjifannicdcjde"
+               autocomplete="off" style="background:#0f172a;color:#fff;border:1px solid #334155">
+        <div style="margin-top:12px;display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" name="email_enable" {% if notify and notify.email_enable %}checked{% endif %} style="width:auto;">
+            <label style="margin:0;">启用邮件通知</label>
+        </div>
+        <div class="btn-group" style="margin-top:20px;">
+            <button type="submit" class="btn btn-success">保存</button>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="max-width:500px;">
+    <h2>📱 Server酱通知</h2>
+    <p style="color:#64748b;font-size:13px;margin-bottom:16px;">
+        作为最后一道保险，所有签到结果也会推送到你的 Server酱。
+    </p>
+    <form method="post">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label>SendKey</label>
+        <input type="text" name="serverchan_key" value="{{ notify.serverchan_key if notify else '' }}" placeholder="SCTxxxxxxxxxxxxxxxxxxx"
+               autocomplete="off" style="background:#0f172a;color:#fff;border:1px solid #334155">
+        <div style="margin-top:12px;display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" name="serverchan_enable" {% if notify and notify.serverchan_enable %}checked{% endif %} style="width:auto;">
+            <label style="margin:0;">启用 Server酱通知</label>
+        </div>
+        <div class="btn-group" style="margin-top:20px;">
+            <button type="submit" class="btn btn-success">保存</button>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="max-width:500px;">
+    <h2>🧪 通知测试</h2>
+    <button class="btn btn-primary btn-sm" onclick="testEmail()">📧 测试邮件</button>
+    <button class="btn btn-secondary btn-sm" onclick="testServerChan()" style="margin-left:8px;">📱 测试 Server酱</button>
+    <div id="notify-result" style="margin-top:12px;"></div>
+</div>
+
+<script>
+function testEmail() {
+    const qq = document.querySelector('input[name="qq"]').value;
+    const auth_code = document.querySelector('input[name="auth_code"]').value;
+    if (!qq || !auth_code) { alert('请先填写 QQ 和授权码'); return; }
+    const f = new FormData();
+    f.append('qq', qq); f.append('auth_code', auth_code);
+    fetch('/notify/test_email', {method:'POST', body:f})
+        .then(r=>r.json()).then(d=>{
+            document.getElementById('notify-result').innerHTML = '<span style="color:'+(d.ok?'#34d399':'#f87171')+'">'+(d.ok?'✓ ':'✗ ')+d.message+'</span>';
+        });
+}
+function testServerChan() {
+    const sendkey = document.querySelector('input[name="serverchan_key"]').value;
+    if (!sendkey) { alert('请先填写 SendKey'); return; }
+    const f = new FormData(); f.append('sendkey', sendkey);
+    fetch('/notify/test_serverchan', {method:'POST', body:f})
+        .then(r=>r.json()).then(d=>{
+            document.getElementById('notify-result').innerHTML = '<span style="color:'+(d.ok?'#34d399':'#f87171')+'">'+(d.ok?'✓ ':'✗ ')+d.message+'</span>';
+        });
+}
+</script>
+{% endblock %}
