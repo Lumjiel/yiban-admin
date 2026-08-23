@@ -2,133 +2,133 @@
 {% block title %}概览 - 易班签到管理{% endblock %}
 {% block content %}
 
+{% set b_cls, b_icon, b_text = banner %}
+<div style="display:flex;align-items:center;gap:10px;padding:14px 18px;margin-bottom:16px;background:var(--bg-elev);border:1px solid var(--border);border-left:4px solid {{ {'success':'var(--success)','danger':'var(--danger)','warning':'var(--warning)','muted':'var(--text-faint)'}[b_cls] }};border-radius:10px;">
+    <span style="font-size:18px;">{{ b_icon }}</span>
+    <span style="font-size:14px;font-weight:500;color:#f1f5f9;">{{ b_text }}</span>
+</div>
+
 <!-- 统计 -->
 <div class="stats-grid">
-    <div class="stat-item"><div class="stat-value">{{ stats.total_users }}</div><div class="stat-label">启用用户</div></div>
-    <div class="stat-item"><div class="stat-value success">{{ stats.today_success }}</div><div class="stat-label">今日成功</div></div>
-    <div class="stat-item"><div class="stat-value danger">{{ stats.today_fail }}</div><div class="stat-label">今日失败</div></div>
-    <div class="stat-item"><div class="stat-value warning">{{ stats.today_rate }}</div><div class="stat-label">今日成功率</div></div>
-    <div class="stat-item"><div class="stat-value">{{ stats.week_success }}</div><div class="stat-label">7日成功</div></div>
-    <div class="stat-item"><div class="stat-value">{{ stats.week_fail }}</div><div class="stat-label">7日失败</div></div>
+    <div class="stat-item"><div class="stat-value" id="stat-total">{{ stats.total_users }}</div><div class="stat-label">启用用户</div></div>
+    <div class="stat-item"><div class="stat-value success" id="stat-today-success">{{ stats.today_success }}</div><div class="stat-label">今日成功</div></div>
+    <div class="stat-item"><div class="stat-value danger" id="stat-today-fail">{{ stats.today_fail }}</div><div class="stat-label">今日失败</div></div>
+    <div class="stat-item"><div class="stat-value warning" id="stat-today-rate">{{ stats.today_rate }}</div><div class="stat-label">今日成功率</div></div>
+    <div class="stat-item"><div class="stat-value" id="stat-week-success">{{ stats.week_success }}</div><div class="stat-label">7日成功</div></div>
+    <div class="stat-item"><div class="stat-value" id="stat-week-fail">{{ stats.week_fail }}</div><div class="stat-label">7日失败</div></div>
 </div>
 
 <!-- 操作面板 -->
 <div class="card">
     <h2>快捷操作</h2>
     <div class="btn-group">
-        <button class="btn btn-success" onclick="triggerSign()">🚀 全部签到</button>
-        <button class="btn btn-warning" onclick="triggerSign(null, true)">🧪 测试登录</button>
-        <button class="btn btn-primary" onclick="syncUsers()">🔄 同步用户</button>
+        <button class="btn btn-success" onclick="triggerSign(null, false, this)">🚀 全部签到</button>
+        <button class="btn btn-warning" onclick="triggerSign(null, true, this)">🧪 测试登录</button>
+        <button class="btn btn-primary" onclick="syncUsers(this)">🔄 同步用户</button>
         <a href="{{ url_for('add_user') }}" class="btn btn-primary">➕ 添加用户</a>
         <a href="{{ url_for('import_users') }}" class="btn btn-secondary">📥 批量导入</a>
     </div>
-    <div id="sse-log" style="margin-top:12px;display:none;"></div>
-    <div id="sse-summary" style="margin-top:8px;"></div>
+    <div id="sse-log" style="margin-top:14px;display:none;"></div>
+    <div id="sse-summary" style="margin-top:10px;"></div>
 </div>
 
 <!-- 用户列表 -->
-<div class="card">
-    <div class="toolbar">
-        <h2 style="margin:0">用户（{{ users|length }}）</h2>
-        <div class="btn-group">
-            <input type="text" id="quickSearch" placeholder="搜索手机号/QQ" style="width:180px" onkeydown="if(event.key==='Enter')searchUser()">
-            <button class="btn btn-sm btn-secondary" onclick="searchUser()">搜索</button>
-        </div>
+<div class="card" style="padding:0;">
+    <div style="padding:20px 20px 0;" class="toolbar">
+        <h2>用户（{{ users|length }}）</h2>
+        <form class="btn-group" onsubmit="searchUser(); return false;">
+            <input type="text" id="quickSearch" placeholder="搜索手机号/QQ" style="width:180px;min-height:38px;">
+            <button type="submit" class="btn btn-sm btn-secondary">搜索</button>
+        </form>
     </div>
-    <table>
+    <div style="padding:0 8px 8px;">
+    <table class="table-card">
         <thead><tr><th>#</th><th>手机号</th><th>QQ</th><th>设备</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
         {% for u in users[:10] %}
             <tr>
-                <td>{{ u.id }}</td><td>{{ u.phone }}</td><td>{{ u.qq }}</td><td>{{ u.phone_model }}</td>
-                <td><span class="badge badge-{{ 'enable' if u.enable else 'disable' }}">{{ '启用' if u.enable else '禁用' }}</span></td>
-                <td class="actions-cell">
-                    <button class="btn btn-sm btn-success" onclick="triggerSign('{{ u.phone }}')">签到</button>
-                    <button class="btn btn-sm btn-warning" onclick="triggerSign('{{ u.phone }}', true)">测试</button>
+                <td data-label="#"> {{ u.id }}</td>
+                <td data-label="手机号">{{ u.phone }}</td>
+                <td data-label="QQ">{{ u.qq }}</td>
+                <td data-label="设备">{{ u.phone_model }}</td>
+                <td data-label="状态"><span class="badge badge-{{ 'enable' if u.enable else 'disable' }}">{{ '启用' if u.enable else '禁用' }}</span></td>
+                <td data-label="" class="no-label actions-cell">
+                    <button class="btn btn-sm btn-success" onclick="triggerSign('{{ u.phone }}', false, this)">签到</button>
+                    <button class="btn btn-sm btn-warning" onclick="triggerSign('{{ u.phone }}', true, this)">测试</button>
                     <a href="{{ url_for('edit_user', phone=u.phone) }}" class="btn btn-sm btn-primary">编辑</a>
                     <form method="post" action="{{ url_for('delete_user', phone=u.phone) }}" style="display:inline" onsubmit="return confirm('删除 {{ u.phone }}?')">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-sm btn-danger" type="submit">删</button>
                     </form>
                 </td>
             </tr>
         {% endfor %}
+        {% if not users %}
+            <tr><td colspan="6" class="empty">暂无用户，先添加一个吧</td></tr>
+        {% endif %}
         {% if users|length > 10 %}
-            <tr><td colspan="6" style="text-align:center;color:#64748b;cursor:pointer" onclick="location.href='/users'">还有 {{ users|length - 10 }} 个用户... 查看全部</td></tr>
+            <tr><td colspan="6" style="text-align:center;color:#64748b;cursor:pointer;padding:14px;" onclick="location.href='{{ url_for('user_list') }}'">还有 {{ users|length - 10 }} 个用户… 点击查看全部 →</td></tr>
         {% endif %}
         </tbody>
     </table>
+    </div>
 </div>
 
 <!-- 最近日志 -->
-<div class="card">
-    <h2>最近签到记录</h2>
-    <table>
-        <thead><tr><th>时间</th><th>手机号</th><th>状态</th><th>详情</th></tr></thead>
+<div class="card" style="padding:0;">
+    <div style="padding:20px 20px 0;" class="toolbar">
+        <h2>最近签到记录</h2>
+        <div class="btn-group">
+            <a href="{{ url_for('logs') }}" class="btn btn-sm btn-secondary">全部日志 →</a>
+            <button class="btn btn-sm btn-danger" onclick="clearLogs()">🗑️ 清空全部</button>
+        </div>
+    </div>
+    <div style="padding:0 8px 8px;">
+    <table class="table-card">
+        <thead><tr><th>时间</th><th>手机号</th><th>状态</th><th>详情</th><th></th></tr></thead>
         <tbody>
         {% for log in recent_logs %}
             <tr>
-                <td>{{ log.created_at }}</td><td>{{ log.phone }}</td>
-                <td><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
-                <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.message }}</td>
+                <td data-label="时间">{{ log.created_at }}</td>
+                <td data-label="手机号">{{ log.phone }}</td>
+                <td data-label="状态"><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
+                <td data-label="详情" class="wrap">{{ log.message }}</td>
+                <td data-label="" class="no-label" style="width:44px"><button class="btn btn-sm btn-danger" onclick="deleteLog({{ log.id }}, this)">✕</button></td>
             </tr>
         {% endfor %}
+        {% if not recent_logs %}
+            <tr><td colspan="5" class="empty">暂无签到记录</td></tr>
+        {% endif %}
         </tbody>
     </table>
+    </div>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
-let currentSource = null;
-
-function triggerSign(phone, testMode) {
-    if (currentSource) currentSource.close();
-    const log = document.getElementById('sse-log');
-    const summary = document.getElementById('sse-summary');
-    log.style.display = 'block';
-    log.innerHTML = '';
-    summary.innerHTML = '<span style="color:#60a5fa">执行中...</span>';
-
-    let url = '/sign/trigger?';
-    if (phone) url += 'phone=' + encodeURIComponent(phone) + '&';
-    if (testMode) url += 'test=1&';
-
-    currentSource = new EventSource(url);
-    let results = [];
-
-    currentSource.onmessage = function(e) {
-        const data = JSON.parse(e.data);
-        if (data.type === 'log') {
-            log.innerHTML += '<div class="sse-line sse-log-line">' + escapeHtml(data.message) + '</div>';
-            log.scrollTop = log.scrollHeight;
-        } else if (data.type === 'info') {
-            log.innerHTML += '<div class="sse-line sse-info">ℹ️ ' + escapeHtml(data.message) + '</div>';
-        } else if (data.type === 'error') {
-            log.innerHTML += '<div class="sse-line sse-error">❌ ' + escapeHtml(data.message) + '</div>';
-        } else if (data.type === 'done') {
-            results = data.results || [];
-            let succ = results.filter(r => r.status === 'success').length;
-            let fail = results.filter(r => r.status === 'fail').length;
-            let skip = results.filter(r => r.status === 'skip').length;
-            summary.innerHTML = `<span style="color:#34d399">✓ 成功: ${succ}</span> &nbsp; <span style="color:#f87171">✗ 失败: ${fail}</span> &nbsp; <span style="color:#fbbf24">⊘ 跳过: ${skip}</span>`;
-            currentSource.close();
-        }
-    };
-    currentSource.onerror = function() { currentSource.close(); };
+function deleteLog(logId, btn) {
+    if (!confirm('删除这条记录?')) return;
+    fetch("{{ url_for('api_delete_log', log_id=0) }}".replace('/0/', '/' + logId + '/'), {method:'POST', headers:{'X-CSRFToken': csrfToken}})
+        .then(r => r.json()).then(d => { if (d.ok) { btn.closest('tr').remove(); toast('已删除', 'success'); } });
 }
 
-function syncUsers() {
-    fetch('/sign/sync', {method:'POST'}).then(r=>r.json()).then(d=>{ alert(d.message); });
+function clearLogs() {
+    if (!confirm('清空所有签到记录? 此操作不可恢复!')) return;
+    fetch("{{ url_for('api_clear_logs') }}", {method:'POST', headers:{'X-CSRFToken': csrfToken}})
+        .then(r => r.json()).then(d => { if (d.ok) location.reload(); });
+}
+
+function syncUsers(btn) {
+    btnLoading(btn, true);
+    fetch("{{ url_for('sync_users') }}", {method:'POST', headers:{'X-CSRFToken': csrfToken}})
+        .then(r => r.json()).then(d => { toast(d.message, d.ok ? 'success' : 'error'); })
+        .finally(() => btnLoading(btn, false));
 }
 
 function searchUser() {
     const q = document.getElementById('quickSearch').value.trim();
-    if (q) location.href = '/users?search=' + encodeURIComponent(q);
-}
-
-function escapeHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+    if (q) location.href = "{{ url_for('user_list') }}?search=" + encodeURIComponent(q);
 }
 </script>
 {% endblock %}

@@ -2,37 +2,59 @@
 {% block title %}签到日历 - 易班签到管理{% endblock %}
 {% block content %}
 <div class="card">
-    <h2>最近 30 天签到热力图</h2>
-    <div style="margin-bottom:12px;font-size:13px;color:#64748b;">
-        {% if date_stats %}
-        共 {{ date_stats|length }} 天有签到记录
-        {% else %}
-        暂无签到数据
-        {% endif %}
+    <div class="toolbar">
+        <h2>最近 30 天签到热力图</h2>
+        <span class="muted">{% if active_days %}共 {{ active_days }} 天有签到记录{% else %}暂无签到数据{% endif %}</span>
     </div>
-    {% if date_stats %}
-    <table style="width:auto;">
+
+    {% if active_days %}
+    <div class="cal-grid">
+        <div class="cal-header">一</div>
+        <div class="cal-header">二</div>
+        <div class="cal-header">三</div>
+        <div class="cal-header">四</div>
+        <div class="cal-header">五</div>
+        <div class="cal-header">六</div>
+        <div class="cal-header">日</div>
+        {% for d in days %}
+        <a href="{{ url_for('calendar_date', date_str=d.date) }}"
+           class="cal-day cal-{{ d.level }}" title="{{ d.date }}{% if d.total %}：成功 {{ d.success }} / 失败 {{ d.fail }}（{{ d.rate }}%）{% else %}：无记录{% endif %}">
+            <span>{{ d.day }}</span>
+            {% if d.rate is not none %}<span class="rate">{{ d.rate }}%</span>{% endif %}
+        </a>
+        {% endfor %}
+    </div>
+    <div class="cal-legend">
+        <span><i style="background:var(--bg-inset);border:1px solid var(--border)"></i> 无记录</span>
+        <span><i class="cal-low"></i> &lt;50%</span>
+        <span><i class="cal-mid"></i> 50-79%</span>
+        <span><i class="cal-high"></i> ≥80%</span>
+        <span><i class="cal-perfect"></i> 100%</span>
+    </div>
+    {% else %}
+    <div class="empty">暂无数据，先去签到一次吧 🚀</div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>每日明细</h2>
+    <div class="table-wrap">
+    <table class="table-card">
         <thead><tr><th>日期</th><th>成功</th><th>失败</th><th>成功率</th></tr></thead>
         <tbody>
-        {% for d in date_stats|reverse %}
-        <tr style="cursor:pointer;" onclick="location.href='/calendar/date/{{ d.date }}'" title="查看详情">
-            <td>{{ d.date }}</td>
-            <td><span style="color:#34d399">{{ d.success }}</span></td>
-            <td><span style="color:#f87171">{{ d.fail }}</span></td>
-            <td>
-                {% if d.total > 0 %}
-                    {% set rate = (d.success / d.total * 100)|round(0)|int %}
-                    <span class="badge badge-{{ 'success' if rate >= 80 else 'warning' if rate >= 50 else 'fail' }}">{{ rate }}%</span>
-                {% else %}
-                    —
-                {% endif %}
-            </td>
+        {% for d in days|selectattr('total', 'gt', 0)|list|reverse %}
+        <tr style="cursor:pointer;" onclick="location.href='{{ url_for('calendar_date', date_str=d.date) }}'">
+            <td data-label="日期">{{ d.date }}</td>
+            <td data-label="成功"><span style="color:var(--success)">{{ d.success }}</span></td>
+            <td data-label="失败"><span style="color:var(--danger)">{{ d.fail }}</span></td>
+            <td data-label="成功率"><span class="badge badge-{{ 'success' if d.rate >= 80 else 'skip' if d.rate >= 50 else 'fail' }}">{{ d.rate }}%</span></td>
         </tr>
         {% endfor %}
+        {% if not active_days %}
+        <tr><td colspan="4" class="empty">该时段无签到记录</td></tr>
+        {% endif %}
         </tbody>
     </table>
-    {% else %}
-    <div class="empty">暂无数据，先去签到一次吧</div>
-    {% endif %}
+    </div>
 </div>
 {% endblock %}

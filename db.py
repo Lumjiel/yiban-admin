@@ -6,6 +6,7 @@ import json
 import hashlib
 import secrets
 import re
+import bcrypt
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
@@ -26,14 +27,44 @@ def get_secret_key() -> str:
 
 
 def get_db() -> sqlite3.Connection:
+    """同请求内复用，context 外新建"""
+    import flask
+    try:
+        if hasattr(flask.g, "_database"):
+            conn = flask.g._database
+            try:
+                conn.execute("SELECT 1")
+                return conn
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                pass
+    except RuntimeError:
+        pass
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        flask.g._database = conn
+    except RuntimeError:
+        pass
     return conn
 
 
+def close_db(exception=None):
+    """请求结束时关闭连接"""
+    import flask
+    try:
+        db_conn = getattr(flask.g, "_database", None)
+        if db_conn is not None:
+            db_conn.close()
+            del flask.g._database
+    except RuntimeError:
+        pass
+
+
 def init_db():
-    conn = get_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,6 +76,7 @@ def init_db():
             device_id TEXT DEFAULT '',
             phone_model TEXT DEFAULT 'iPhone-15-Pro-Max',
             enable INTEGER DEFAULT 1,
+            success_notify INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -72,7 +104,11 @@ def init_db():
             auth_code TEXT DEFAULT '',
             email_enable INTEGER DEFAULT 1,
             serverchan_key TEXT DEFAULT '',
-            serverchan_enable INTEGER DEFAULT 0
+            serverchan_enable INTEGER DEFAULT 0,
+            summary_recipient TEXT DEFAULT '',
+            template_a TEXT DEFAULT '',
+            template_b TEXT DEFAULT '',
+            template_success TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS audit_log (
@@ -101,33 +137,63 @@ def init_db():
     # 确保 admin 存在（只在为空时创建默认账户）
     row = conn.execute("SELECT * FROM admin_config WHERE id = 1").fetchone()
     if not row or not row['password_hash']:
-        salt = secrets.token_hex(16)
-        pw_hash = _hash_password('admin123', salt)
-        conn.execute("""INSERT OR REPLACE INTO admin_config (id, username, password_hash, salt)
-                        VALUES (1, 'admin', ?, ?)""", (pw_hash, salt))
+        pw_hash = _hash_password('admin123')
+        conn.execute("""INSERT OR REPLACE INTO admin_config (id, username, password_hash)
+                        VALUES (1, 'admin', ?)""", (pw_hash,))
 
     conn.execute("INSERT OR IGNORE INTO notify_config (id) VALUES (1)")
+
+    # 迁移：新增字段（已存在则忽略）
+    try:
+        conn.execute("ALTER TABLE notify_config ADD COLUMN summary_recipient TEXT DEFAULT ''")
+    except: pass
+    try:
+        conn.execute("ALTER TABLE notify_config ADD COLUMN template_a TEXT DEFAULT ''")
+    except: pass
+    try:
+        conn.execute("ALTER TABLE notify_config ADD COLUMN template_b TEXT DEFAULT ''")
+    except: pass
+    try:
+        conn.execute("ALTER TABLE notify_config ADD COLUMN template_success TEXT DEFAULT ''")
+    except: pass
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN success_notify INTEGER DEFAULT 0")
+    except: pass
+    # 首次初始化模板（仅当为空时）
+    row = conn.execute("SELECT template_a FROM notify_config WHERE id = 1").fetchone()
+    if row is not None and not row[0]:
+        conn.execute("""UPDATE notify_config SET
+                        template_a = '易班会话已过期\n自行登录易班完成图形验证，刷新会话即可正常签到\n请及时操作，防止漏签',
+                        template_b = '易班校本化授权已失效。\n请前往易班首页，点击校本化入口，在弹出的授权弹窗中完成授权即可。\n授权剩余有效期可查看：我的 - 设置 - 授权管理 - 校本化 - 授权有效期。\n请留意自身签到状态，如有异常随时反馈。',
+                        template_success = '易班签到成功通知\n\n账号: {phone}\n签到结果: {result}\n签到时间: {time}\n签到地址: {address}'
+                        WHERE id = 1""")
     conn.commit()
     conn.close()
 
 
 # ========== 密码哈希 ==========
 
-def _hash_password(password: str, salt: str) -> str:
-    """SHA256 + 盐，迭代 10000 次"""
-    key = (password + salt).encode('utf-8')
-    for _ in range(10000):
-        key = hashlib.sha256(key).digest()
-    return key.hex()
+def _hash_password(password: str, salt: str = None) -> str:
+    """bcrypt 哈希"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
 def verify_admin(username: str, password: str) -> bool:
     conn = get_db()
     row = conn.execute("SELECT * FROM admin_config WHERE id = 1 AND username = ?", (username,)).fetchone()
-    conn.close()
     if not row or not row['password_hash']:
         return False
-    return _hash_password(password, row['salt']) == row['password_hash']
+    stored_hash = row['password_hash']
+    if _is_bcrypt_hash(stored_hash):
+        return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
+    salt = row['salt'] if 'salt' in row.keys() else None
+    if salt and _hash_password_legacy(password, salt) == stored_hash:
+        new_hash = _hash_password(password)
+        conn2 = get_db()
+        conn2.execute("UPDATE admin_config SET password_hash = ?, salt = '' WHERE id = 1", (new_hash,))
+        conn2.commit()
+        return True
+    return False
 
 
 def change_admin_password(old_pw: str, new_pw: str) -> tuple:
@@ -135,11 +201,10 @@ def change_admin_password(old_pw: str, new_pw: str) -> tuple:
         return False, "原密码错误"
     if len(new_pw) < 4:
         return False, "密码长度至少 4 位"
-    new_salt = secrets.token_hex(16)
-    new_hash = _hash_password(new_pw, new_salt)
+    new_hash = _hash_password(new_pw)
     conn = get_db()
-    conn.execute("UPDATE admin_config SET password_hash = ?, salt = ?, updated_at = ? WHERE id = 1",
-                 (new_hash, new_salt, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    conn.execute("UPDATE admin_config SET password_hash = ?, updated_at = ? WHERE id = 1",
+                 (new_hash, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
     conn.commit()
     conn.close()
     return True, "密码修改成功"
@@ -264,7 +329,7 @@ def get_user(phone: str) -> Optional[sqlite3.Row]:
     return row
 
 
-def add_user(phone, qq, password, sendkey='', address='', device_id='', phone_model='iPhone-15-Pro-Max') -> tuple:
+def add_user(phone, qq, password, sendkey='', address='', device_id='', phone_model='iPhone-15-Pro-Max', success_notify=0) -> tuple:
     # 输入过滤
     phone = sanitize_str(phone, 11)
     qq = sanitize_str(qq, 20)
@@ -294,9 +359,9 @@ def add_user(phone, qq, password, sendkey='', address='', device_id='', phone_mo
 
     conn = get_db()
     try:
-        conn.execute("""INSERT INTO users (phone, qq, password, sendkey, address, device_id, phone_model)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                     (phone, qq, password, sendkey, address, device_id, phone_model))
+        conn.execute("""INSERT INTO users (phone, qq, password, sendkey, address, device_id, phone_model, success_notify)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                     (phone, qq, password, sendkey, address, device_id, phone_model, success_notify))
         conn.commit()
         return True, "添加成功"
     except sqlite3.IntegrityError:
@@ -349,7 +414,7 @@ def batch_add_users(users: list) -> tuple:
 
 
 def update_user(phone: str, **kwargs) -> tuple:
-    allowed = {'qq', 'password', 'sendkey', 'address', 'device_id', 'phone_model', 'enable'}
+    allowed = {'qq', 'password', 'sendkey', 'address', 'device_id', 'phone_model', 'enable', 'success_notify'}
     fields = {}
     for k, v in kwargs.items():
         if k in allowed:
@@ -382,11 +447,12 @@ def delete_user(phone: str):
 
 
 def batch_delete_users(phones: list):
+    if not phones:
+        return
     conn = get_db()
-    for p in phones:
-        conn.execute("DELETE FROM users WHERE phone = ?", (p,))
+    placeholders = ",".join("?" * len(phones))
+    conn.execute(f"DELETE FROM users WHERE phone IN ({placeholders})", phones)
     conn.commit()
-    conn.close()
 
 
 def toggle_user(phone: str):
@@ -456,11 +522,15 @@ def get_notify_config() -> Optional[sqlite3.Row]:
 
 
 def set_notify_config(qq: str, auth_code: str, email_enable: int = 1,
-                      serverchan_key: str = '', serverchan_enable: int = 0):
+                      serverchan_key: str = '', serverchan_enable: int = 0,
+                      summary_recipient: str = '',
+                      template_a: str = '', template_b: str = '', template_success: str = ''):
     conn = get_db()
-    conn.execute("""INSERT OR REPLACE INTO notify_config (id, qq, auth_code, email_enable, serverchan_key, serverchan_enable)
-                    VALUES (1, ?, ?, ?, ?, ?)""",
-                 (qq, auth_code, email_enable, serverchan_key, serverchan_enable))
+    conn.execute("""INSERT OR REPLACE INTO notify_config (id, qq, auth_code, email_enable, serverchan_key, serverchan_enable,
+                    summary_recipient, template_a, template_b, template_success)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 (qq, auth_code, email_enable, serverchan_key, serverchan_enable,
+                  summary_recipient, template_a, template_b, template_success))
     conn.commit()
     conn.close()
 
@@ -516,22 +586,26 @@ def get_date_stats(days: int = 30) -> list:
 
 def get_stats() -> dict:
     conn = get_db()
-    today = datetime.now().strftime('%Y-%m-%d')
+    # 注意：created_at 存的是 UTC，需换算成"北京时间当日 0 点"对应的 UTC 截断点
+    today_cutoff = (datetime.utcnow() - timedelta(hours=8)).strftime('%Y-%m-%d') + ' 00:00:00'
+    week_cutoff = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
 
     total_users = conn.execute("SELECT COUNT(*) FROM users WHERE enable = 1").fetchone()[0]
     total_all = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
     today_success = conn.execute(
         "SELECT COUNT(DISTINCT phone) FROM sign_logs WHERE status='success' AND created_at >= ?",
-        (today,)).fetchone()[0]
+        (today_cutoff,)).fetchone()[0]
     today_fail = conn.execute(
         "SELECT COUNT(DISTINCT phone) FROM sign_logs WHERE status='fail' AND created_at >= ?",
-        (today,)).fetchone()[0]
+        (today_cutoff,)).fetchone()[0]
+    today_skip = conn.execute(
+        "SELECT COUNT(DISTINCT phone) FROM sign_logs WHERE status='skip' AND created_at >= ?",
+        (today_cutoff,)).fetchone()[0]
 
-    last_7d = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
     week_stats = conn.execute(
         "SELECT status, COUNT(DISTINCT phone) as cnt FROM sign_logs WHERE created_at >= ? GROUP BY status",
-        (last_7d,)).fetchall()
+        (week_cutoff,)).fetchall()
 
     conn.close()
 
@@ -542,5 +616,63 @@ def get_stats() -> dict:
     return {
         "total_users": total_users, "total_all": total_all,
         "today_success": today_success, "today_fail": today_fail,
-        "today_rate": rate, "week_success": week_success, "week_fail": week_fail,
+        "today_skip": today_skip, "today_rate": rate,
+        "week_success": week_success, "week_fail": week_fail,
     }
+
+
+# ========== 密码哈希迁移（旧 SHA256 → bcrypt）==========
+
+def _hash_password_legacy(password: str, salt: str) -> str:
+    """旧 SHA256 哈希"""
+    import hashlib
+    key = (password + salt).encode('utf-8')
+    for _ in range(10000):
+        key = hashlib.sha256(key).digest()
+    return key.hex()
+
+
+def _is_bcrypt_hash(hash_str: str) -> bool:
+    """检查 bcrypt 格式"""
+    return hash_str.startswith('$2b$') or hash_str.startswith('$2a$') or hash_str.startswith('$2y$')
+
+# ========== 日志管理 ==========
+
+def delete_sign_log(log_id: int):
+    """删除单条签到记录，返回是否成功删除"""
+    conn = get_db()
+    cur = conn.execute("DELETE FROM sign_logs WHERE id = ?", (log_id,))
+    conn.commit()
+    return cur.rowcount > 0
+
+def clear_sign_logs():
+    """清空所有签到记录，返回删除条数"""
+    conn = get_db()
+    n = conn.execute("SELECT COUNT(*) FROM sign_logs").fetchone()[0]
+    conn.execute("DELETE FROM sign_logs")
+    conn.commit()
+    return n
+
+def cleanup_old_logs(days: int = 90):
+    """清理超过指定天数的签到日志，返回删除条数"""
+    conn = get_db()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    cur = conn.execute("DELETE FROM sign_logs WHERE created_at < ?", (cutoff,))
+    conn.commit()
+    n = cur.rowcount
+    conn.close()
+    return n
+
+def get_logs_page(page: int = 1, per_page: int = 20, phone: str = '') -> tuple:
+    """分页获取签到日志，返回 (logs, total)。phone 为空则不过滤"""
+    conn = get_db()
+    where, params = '', []
+    if phone:
+        where, params = 'WHERE phone = ?', [phone]
+    total = conn.execute(f'SELECT COUNT(*) FROM sign_logs {where}', params).fetchone()[0]
+    offset = (page - 1) * per_page
+    logs = conn.execute(
+        f'SELECT * FROM sign_logs {where} ORDER BY id DESC LIMIT ? OFFSET ?',
+        params + [per_page, offset]).fetchall()
+    conn.close()
+    return logs, total

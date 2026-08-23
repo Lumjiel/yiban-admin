@@ -2,17 +2,18 @@
 {% block title %}签到日志 - 易班签到管理{% endblock %}
 {% block content %}
 <div class="toolbar">
-    <h2 style="font-size:18px;">签到日志 {% if filter_phone %}- {{ filter_phone }}{% endif %}</h2>
-    <form method="get" style="display:flex;gap:8px;">
+    <h2>签到日志 {% if filter_phone %}<span class="badge badge-enable">{{ filter_phone }}</span>{% endif %}</h2>
+    <form method="get" class="btn-group" style="flex-wrap:nowrap;">
         <input type="text" name="phone" placeholder="按手机号筛选" value="{{ filter_phone }}" style="width:200px;">
         <button class="btn btn-primary btn-sm" type="submit">筛选</button>
         {% if filter_phone %}
-        <a href="{{ url_for('logs') }}" class="btn btn-sm">清除</a>
+        <a href="{{ url_for('logs') }}" class="btn btn-sm btn-secondary">清除</a>
         {% endif %}
     </form>
 </div>
 <div class="card" style="padding:0;overflow:hidden;">
-    <table>
+    <div class="table-wrap">
+    <table class="table-card">
         <thead>
             <tr>
                 <th>时间</th>
@@ -25,11 +26,11 @@
         <tbody>
             {% for log in logs %}
             <tr>
-                <td>{{ log.created_at }}</td>
-                <td><a href="?phone={{ log.phone }}" style="color:#60a5fa;">{{ log.phone }}</a></td>
-                <td><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
-                <td style="max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.message }}</td>
-                <td>{{ log.batch_id }}</td>
+                <td data-label="时间">{{ log.created_at }}</td>
+                <td data-label="手机号"><a href="?phone={{ log.phone }}" style="color:var(--primary);text-decoration:none;">{{ log.phone }}</a></td>
+                <td data-label="状态"><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
+                <td data-label="详情" class="wrap">{{ log.message }}</td>
+                <td data-label="批次"><span class="muted">{{ log.batch_id }}</span></td>
             </tr>
             {% endfor %}
             {% if not logs %}
@@ -37,5 +38,19 @@
             {% endif %}
         </tbody>
     </table>
+    </div>
+</div>
+
+<div class="pagination">
+    <span class="page-info">共 {{ total }} 条记录</span>
+    <div class="btn-group">
+        {% if cur_page > 1 %}
+            <a href="?page={{ cur_page-1 }}{% if filter_phone %}&phone={{ filter_phone }}{% endif %}" class="btn btn-sm btn-secondary">← 上一页</a>
+        {% endif %}
+        <span class="page-info">{{ cur_page }} / {{ pages }}</span>
+        {% if cur_page < pages %}
+            <a href="?page={{ cur_page+1 }}{% if filter_phone %}&phone={{ filter_phone }}{% endif %}" class="btn btn-sm btn-secondary">下一页 →</a>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}

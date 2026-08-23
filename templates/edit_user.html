@@ -1,26 +1,26 @@
 {% extends 'base.html' %}
-{% block title %}编辑用户 - 易班签到管理{% endblock %}
+{% block title %}编辑用户 {{ user.phone }} - 易班签到管理{% endblock %}
 {% block content %}
 <div class="card" style="max-width:700px;">
-    <h2>编辑用户：{{ user.phone }}</h2>
+    <h2>✏️ 编辑用户：{{ user.phone }}</h2>
     <form method="post">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="form-grid">
             <div>
                 <label>手机号</label>
-                <input type="text" value="{{ user.phone }}" disabled style="opacity:0.5;background:#0f172a;color:#fff;border:1px solid #334155">
+                <input type="text" value="{{ user.phone }}" disabled>
             </div>
             <div>
                 <label>QQ号</label>
-                <input type="text" name="qq" value="{{ user.qq }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+                <input type="text" name="qq" value="{{ user.qq }}" autocomplete="off">
             </div>
             <div>
                 <label>密码</label>
-                <input type="text" name="password" value="{{ user.password }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+                <input type="text" name="password" value="{{ user.password }}" autocomplete="off">
             </div>
             <div>
                 <label>手机型号</label>
-                <input type="text" name="phone_model" id="phoneModel" list="phoneModels" value="{{ user.phone_model }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+                <input type="text" name="phone_model" id="phoneModel" list="phoneModels" value="{{ user.phone_model }}" autocomplete="off">
                 <datalist id="phoneModels">
                     <option value="iPhone-16-Pro-Max">
                     <option value="iPhone-16-Pro">
@@ -40,19 +40,23 @@
             </div>
             <div>
                 <label>设备ID</label>
-                <input type="text" name="device_id" value="{{ user.device_id }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+                <input type="text" name="device_id" value="{{ user.device_id }}" autocomplete="off">
             </div>
             <div>
                 <label>Server酱 SendKey</label>
-                <input type="text" name="sendkey" value="{{ user.sendkey }}" style="background:#0f172a;color:#fff;border:1px solid #334155">
+                <input type="text" name="sendkey" value="{{ user.sendkey }}" autocomplete="off">
             </div>
         </div>
         <div style="margin-top:16px;">
             <label>签到地址</label>
-            <textarea name="address" rows="2" style="background:#0f172a;color:#fff;border:1px solid #334155">{{ user.address }}</textarea>
+            <textarea name="address" rows="2" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;">{{ user.address }}</textarea>
         </div>
-        <div class="btn-group" style="margin-top:20px;">
-            <button type="submit" class="btn btn-success">保存</button>
+        <div class="checkbox-row">
+            <input type="checkbox" name="success_notify" id="success_notify" {% if user.success_notify %}checked{% endif %}>
+            <label for="success_notify">单独成功通知（签到成功后发邮件通知该用户）</label>
+        </div>
+        <div class="btn-group" style="margin-top:24px;">
+            <button type="submit" class="btn btn-success">💾 保存</button>
             <a href="{{ url_for('user_list') }}" class="btn btn-secondary">取消</a>
         </div>
     </form>

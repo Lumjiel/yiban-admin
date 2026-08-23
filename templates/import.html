@@ -2,28 +2,27 @@
 {% block title %}批量导入 - 易班签到管理{% endblock %}
 {% block content %}
 <div class="card" style="max-width:700px;">
-    <h2>批量导入用户</h2>
-    <p style="color:#64748b;font-size:13px;margin-bottom:16px;">支持 JSON 或 CSV 格式，手机号重复则跳过。</p>
-
-    <div style="margin-bottom:16px;">
+    <div class="toolbar">
+        <h2>批量导入用户</h2>
         <a href="{{ url_for('export_users') }}" class="btn btn-sm btn-secondary">📤 导出当前用户</a>
     </div>
+    <p class="muted" style="margin-bottom:16px;">支持 JSON 或 CSV 格式，手机号重复则自动跳过。</p>
 
     <form method="post" enctype="multipart/form-data">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <label>上传文件（.json 或 .csv）</label>
         <input type="file" name="file" accept=".json,.csv,.txt">
-        <div style="text-align:center;margin:16px 0;color:#64748b;">— 或者 —</div>
+        <div style="text-align:center;margin:18px 0;color:var(--text-faint);font-size:13px;">— 或者 —</div>
         <label>粘贴内容</label>
-        <textarea name="content" rows="8" placeholder='[{"phone":"138...","qq":"123...","password":"..."}] 或 CSV'></textarea>
+        <textarea name="content" rows="8" placeholder='[{"phone":"138...","qq":"123...","password":"..."}] 或 CSV' style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;"></textarea>
         <label>格式</label>
         <select name="format">
             <option value="auto">自动检测</option>
             <option value="json">JSON</option>
             <option value="csv">CSV</option>
         </select>
-        <div class="btn-group" style="margin-top:20px;">
-            <button type="submit" class="btn btn-success">导入</button>
+        <div class="btn-group" style="margin-top:22px;">
+            <button type="submit" class="btn btn-success">📥 导入</button>
             <a href="{{ url_for('user_list') }}" class="btn btn-secondary">取消</a>
         </div>
     </form>
@@ -31,13 +30,13 @@
 
 <div class="card" style="max-width:700px;">
     <h2>格式说明</h2>
-    <h3 style="margin-top:12px;font-size:13px;color:#94a3b8;">JSON 格式</h3>
-    <pre>[
+    <label style="margin-top:12px;">JSON 格式</label>
+<pre>[
   {"phone": "13800138000", "qq": "123456", "password": "xxx",
-   "sendkey": "SCTxxx", "address": "...", "device_id": "...", "phoneModel": "Vivo"}
+   "sendkey": "SCTxxx", "address": "...", "device_id": "...", "phone_model": "Vivo"}
 ]</pre>
-    <h3 style="margin-top:12px;font-size:13px;color:#94a3b8;">CSV 格式（首行表头）</h3>
-    <pre>phone,qq,password,sendkey,address,device_id,phone_model
+    <label>CSV 格式（首行表头）</label>
+<pre>phone,qq,password,sendkey,address,device_id,phone_model
 13800138000,123456,xxx,SCTxxx,...,Vivo</pre>
 </div>
 {% endblock %}

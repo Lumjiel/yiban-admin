@@ -1,27 +1,28 @@
 {% extends 'base.html' %}
-{% block title %}{{ date }} 签到详情{% endblock %}
+{% block title %}{{ date }} 签到详情 - 易班签到管理{% endblock %}
 {% block content %}
 <div class="toolbar">
-    <h2 style="font-size:18px;">{{ date }} 签到详情</h2>
+    <h2>{{ date }} 签到详情</h2>
     <a href="{{ url_for('calendar') }}" class="btn btn-sm btn-secondary">← 返回日历</a>
 </div>
 <div class="card" style="padding:0;overflow:hidden;">
-    {% if logs %}
-    <table>
+    <div class="table-wrap">
+    <table class="table-card">
         <thead><tr><th>时间</th><th>手机号</th><th>状态</th><th>详情</th></tr></thead>
         <tbody>
         {% for log in logs %}
             <tr>
-                <td>{{ log.created_at.split(' ')[1] if ' ' in log.created_at else log.created_at }}</td>
-                <td>{{ log.phone }}</td>
-                <td><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
-                <td style="max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.message }}</td>
+                <td data-label="时间">{{ log.created_at.split(' ')[1] if ' ' in log.created_at else log.created_at }}</td>
+                <td data-label="手机号">{{ log.phone }}</td>
+                <td data-label="状态"><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
+                <td data-label="详情" class="wrap">{{ log.message }}</td>
             </tr>
         {% endfor %}
+        {% if not logs %}
+        <tr><td colspan="4" class="empty">该日期无签到记录</td></tr>
+        {% endif %}
         </tbody>
     </table>
-    {% else %}
-    <div class="empty">该日期无签到记录</div>
-    {% endif %}
+    </div>
 </div>
 {% endblock %}

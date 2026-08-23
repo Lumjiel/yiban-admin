@@ -2,72 +2,59 @@
 {% block title %}添加用户 - 易班签到管理{% endblock %}
 {% block content %}
 <style>
-.model-input-wrap { display: flex; gap: 0; }
-.model-input-wrap input {
-    flex: 1; background: #0f172a; color: #fff; border: 1px solid #334155;
-    border-radius: 8px 0 0 8px; padding: 10px 14px; font-size: 14px; outline: none;
-}
-.model-input-wrap input:focus { border-color: #3b82f6; }
-.model-input-wrap .dropdown-btn {
-    background: #1e293b; border: 1px solid #334155; border-left: none;
-    border-radius: 0 8px 8px 0; padding: 10px 12px; color: #94a3b8;
-    cursor: pointer; font-size: 12px; min-width: 40px;
-}
-.model-input-wrap .dropdown-btn:hover { background: #334155; color: #e2e8f0; }
-.model-dropdown {
-    position: absolute; top: 100%; left: 0; right: 0; background: #1e293b;
-    border: 1px solid #334155; border-radius: 8px; margin-top: 4px; z-index: 100;
-    max-height: 240px; overflow-y: auto; display: none;
-}
-.model-dropdown.show { display: block; }
-.model-group-title {
-    padding: 6px 14px; font-size: 11px; color: #64748b; background: #0f172a;
-    text-transform: uppercase; letter-spacing: 1px; font-weight: 600;
-}
-.model-option {
-    padding: 8px 14px; cursor: pointer; font-size: 13px; color: #e2e8f0;
-    border-bottom: px solid #334155;
-}
-.model-option:last-child { border-bottom: none; }
-.model-option:hover { background: #334155; }
-.model-wrapper { position: relative; }
+    .model-input-wrap { display: flex; }
+    .model-input-wrap input { flex: 1; border-radius: 8px 0 0 8px; border-right: none; }
+    .model-input-wrap .dropdown-btn {
+        background: var(--bg-elev); border: 1px solid var(--border);
+        border-radius: 0 8px 8px 0; padding: 0 14px; color: var(--text-dim);
+        cursor: pointer; font-size: 12px; min-height: 44px;
+    }
+    .model-input-wrap .dropdown-btn:hover { background: var(--bg-inset); color: var(--text); }
+    .model-dropdown {
+        position: absolute; top: 100%; left: 0; right: 0; background: var(--bg-elev);
+        border: 1px solid var(--border-light); border-radius: 8px; margin-top: 4px; z-index: 100;
+        max-height: 260px; overflow-y: auto; -webkit-overflow-scrolling: touch; display: none; box-shadow: var(--shadow);
+    }
+    .model-dropdown.show { display: block; }
+    .model-group-title {
+        padding: 8px 14px 4px; font-size: 11px; color: var(--text-faint);
+        text-transform: uppercase; letter-spacing: 1px; font-weight: 600;
+    }
+    .model-option { padding: 10px 14px; cursor: pointer; font-size: 13px; color: var(--text); }
+    .model-option:hover { background: var(--primary-soft); color: #fff; }
+    .model-wrapper { position: relative; }
 </style>
 <div class="card" style="max-width:700px;">
-    <h2>添加新用户</h2>
+    <h2>➕ 添加新用户</h2>
     <form method="post">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="form-grid">
             <div>
                 <label>手机号 *</label>
                 <input type="tel" name="phone" placeholder="13800138000" required
                        value="{{ form.phone if form else '' }}"
                        autocomplete="off" autocorrect="off" spellcheck="false"
-                       pattern="\d{11}" maxlength="11"
-                       style="background:#0f172a;color:#fff;border:1px solid #334155">
+                       pattern="\d{11}" maxlength="11" inputmode="numeric">
             </div>
             <div>
                 <label>QQ号 *</label>
                 <input type="text" name="qq" placeholder="123456789" required
                        value="{{ form.qq if form else '' }}"
-                       autocomplete="off" autocorrect="off" spellcheck="false"
-                       style="background:#0f172a;color:#fff;border:1px solid #334155">
+                       autocomplete="off" autocorrect="off" spellcheck="false">
             </div>
             <div>
                 <label>密码 *</label>
                 <input type="text" name="password" placeholder="易班登录密码" required
-                       value="{{ form.password if form else '' }}"
-                       autocomplete="off"
-                       style="background:#0f172a;color:#fff;border:1px solid #334155">
+                       value="{{ form.password if form else '' }}" autocomplete="off">
             </div>
             <div>
                 <label>手机型号 *</label>
                 <div class="model-wrapper">
                     <div class="model-input-wrap">
                         <input type="text" name="phone_model" id="phoneModelInput" required
-                               value="{{ form.phone_model if form else 'iPhone-15-Pro-Max' }}"
-                               placeholder="选择或自定义输入..."
-                               autocomplete="off"
-                               onfocus="document.getElementById('modelDrop').classList.add('show')">
+                               value="{{ form.phone_model if form else '' }}"
+                               placeholder="点右侧 ▼ 选择，或直接输入"
+                               autocomplete="off">
                         <button type="button" class="dropdown-btn" onclick="toggleModelDrop()">▼</button>
                     </div>
                     <div class="model-dropdown" id="modelDrop">
@@ -98,29 +85,31 @@
                 <input type="text" name="device_id" required
                        value="{{ form.device_id if form else '' }}"
                        placeholder="如: 2f3669f9-a667-4d42-8630-8066a824ff59"
-                       autocomplete="off"
-                       style="background:#0f172a;color:#fff;border:1px solid #334155">
+                       autocomplete="off" spellcheck="false">
             </div>
             <div>
                 <label>Server酱 SendKey（选填）</label>
                 <input type="text" name="sendkey" placeholder="SCTxxxxx"
-                       value="{{ form.sendkey if form else '' }}"
-                       autocomplete="off"
-                       style="background:#0f172a;color:#fff;border:1px solid #334155">
+                       value="{{ form.sendkey if form else '' }}" autocomplete="off">
             </div>
         </div>
         <div style="margin-top:16px;">
             <label>签到地址（默认南京工程学院）</label>
-            <textarea name="address" rows="2"
-                      style="background:#0f172a;color:#fff;border:1px solid #334155">{{ form.address if form else '{"Reason":"","AttachmentFileName":"","LngLat":"118.88,31.93","Address":""}' }}</textarea>
+            <textarea name="address" rows="2" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;">{{ form.address if form else '{"Reason":"","AttachmentFileName":"","LngLat":"118.88,31.93","Address":""}' }}</textarea>
         </div>
-        <div class="btn-group" style="margin-top:20px;">
-            <button type="submit" class="btn btn-success">保存</button>
+        <div class="checkbox-row">
+            <input type="checkbox" name="success_notify" id="success_notify">
+            <label for="success_notify">单独成功通知（签到成功后发邮件通知该用户）</label>
+        </div>
+        <div class="btn-group" style="margin-top:24px;">
+            <button type="submit" class="btn btn-success">💾 保存</button>
             <a href="{{ url_for('user_list') }}" class="btn btn-secondary">取消</a>
         </div>
     </form>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
 function setModel(val) {
     document.getElementById('phoneModelInput').value = val;
@@ -129,13 +118,11 @@ function setModel(val) {
 function toggleModelDrop() {
     document.getElementById('modelDrop').classList.toggle('show');
 }
-// 点击外部关闭
 document.addEventListener('click', function(e) {
     if (!e.target.closest('.model-wrapper')) {
         document.getElementById('modelDrop').classList.remove('show');
     }
 });
-// 输入框输入时保持下拉打开以便参考
 document.getElementById('phoneModelInput').addEventListener('click', function() {
     document.getElementById('modelDrop').classList.add('show');
 });

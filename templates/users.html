@@ -2,127 +2,105 @@
 {% block title %}用户管理 - 易班签到管理{% endblock %}
 {% block content %}
 <div class="toolbar">
-    <h2 style="margin:0">用户管理（共 {{ total }} 人）</h2>
+    <h2>用户管理（共 {{ total }} 人）</h2>
     <div class="btn-group">
-        <form method="get" style="display:flex;gap:8px;">
+        <form method="get" class="btn-group" style="flex-wrap:nowrap;">
             <input type="text" name="search" placeholder="搜索手机号/QQ/型号" value="{{ search }}" style="width:200px;">
             <button class="btn btn-sm btn-secondary" type="submit">搜索</button>
-            {% if search %}<a href="{{ url_for('user_list') }}" class="btn btn-sm">清除</a>{% endif %}
+            {% if search %}<a href="{{ url_for('user_list') }}" class="btn btn-sm btn-secondary">清除</a>{% endif %}
         </form>
         <a href="{{ url_for('add_user') }}" class="btn btn-sm btn-success">➕ 添加</a>
-        <a href="{{ url_for('import_users') }}" class="btn btn-sm btn-primary">📥 批量导入</a>
+        <a href="{{ url_for('import_users') }}" class="btn btn-sm btn-primary">📥 导入</a>
         <a href="{{ url_for('export_users') }}" class="btn btn-sm btn-secondary">📤 导出</a>
     </div>
 </div>
 
-<form method="post" action="{{ url_for('batch_delete_users') }}" id="batchForm" onsubmit="return confirm('确定删除选中的用户？')">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-<div class="card" style="padding:0;overflow:hidden;">
-    <table>
-        <thead>
-            <tr>
-                <th style="width:36px"><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
-                <th>#</th>
-                <th>手机号</th>
-                <th>QQ</th>
-                <th>设备型号</th>
-                <th>Server酱</th>
-                <th>状态</th>
-                <th>操作</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for u in users %}
-            <tr>
-                <td><input type="checkbox" name="phones" value="{{ u.phone }}" class="row-check"></td>
-                <td>{{ u.id }}</td>
-                <td>{{ u.phone }}</td>
-                <td>{{ u.qq }}</td>
-                <td>{{ u.phone_model }}</td>
-                <td>{% if u.sendkey %}✓{% else %}—{% endif %}</td>
-                <td><span class="badge badge-{{ 'enable' if u.enable else 'disable' }}">{{ '启用' if u.enable else '禁用' }}</span></td>
-                <td class="actions-cell">
-                    <button class="btn btn-sm btn-success" onclick="triggerSign('{{ u.phone }}');return false;">签到</button>
-                    <button class="btn btn-sm btn-warning" onclick="triggerSign('{{ u.phone }}', true);return false;">测试</button>
-                    <a href="{{ url_for('edit_user', phone=u.phone) }}" class="btn btn-sm btn-primary">编辑</a>
-                    <form method="post" action="{{ url_for('delete_user', phone=u.phone) }}" style="display:inline" onsubmit="return confirm('删除 {{ u.phone }}?')">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-sm btn-danger" type="submit">删</button>
-                    </form>
-                </td>
-            </tr>
-        {% endfor %}
-        {% if not users %}
-            <tr><td colspan="8" class="empty">{% if search %}没有匹配的用户{% else %}暂无用户{% endif %}</td></tr>
-        {% endif %}
-        </tbody>
-    </table>
-</div>
+<form method="post" action="{{ url_for('batch_delete_users') }}" id="batchForm" onsubmit="return validateBatch()">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="card" style="padding:0;overflow:hidden;">
+        <div class="table-wrap">
+        <table class="table-card">
+            <thead>
+                <tr>
+                    <th style="width:40px"><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
+                    <th>#</th>
+                    <th>手机号</th>
+                    <th>QQ</th>
+                    <th>设备型号</th>
+                    <th>Server酱</th>
+                    <th>成功通知</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for u in users %}
+                <tr>
+                    <td data-label="" class="no-label"><input type="checkbox" name="phones" value="{{ u.phone }}" class="row-check"></td>
+                    <td data-label="#"> {{ u.id }}</td>
+                    <td data-label="手机号">{{ u.phone }}</td>
+                    <td data-label="QQ">{{ u.qq }}</td>
+                    <td data-label="设备">{{ u.phone_model }}</td>
+                    <td data-label="Server酱">{% if u.sendkey %}<span style="color:var(--success)">✓</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+                    <td data-label="成功通知">{% if u.success_notify %}<span style="color:var(--success)">✓</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+                    <td data-label="状态"><span class="badge badge-{{ 'enable' if u.enable else 'disable' }}">{{ '启用' if u.enable else '禁用' }}</span></td>
+                    <td data-label="" class="no-label actions-cell">
+                        <button class="btn btn-sm btn-success" onclick="triggerSign('{{ u.phone }}', false, this); return false;">签到</button>
+                        <button class="btn btn-sm btn-warning" onclick="triggerSign('{{ u.phone }}', true, this); return false;">测试</button>
+                        <a href="{{ url_for('edit_user', phone=u.phone) }}" class="btn btn-sm btn-primary">编辑</a>
+                        <form method="post" action="{{ url_for('toggle_user', phone=u.phone) }}" style="display:inline" onsubmit="return confirm('{{ '禁用' if u.enable else '启用' }} {{ u.phone }}？')">
+                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-{{ 'warning' if u.enable else 'success' }}" type="submit">{{ '禁用' if u.enable else '启用' }}</button>
+                        </form>
+                        <form method="post" action="{{ url_for('delete_user', phone=u.phone) }}" style="display:inline" onsubmit="return confirm('删除 {{ u.phone }}?')">
+                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-danger" type="submit">删</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            {% if not users %}
+                <tr><td colspan="9" class="empty">{% if search %}没有匹配的用户{% else %}暂无用户{% endif %}</td></tr>
+            {% endif %}
+            </tbody>
+        </table>
+        </div>
+    </div>
 
-{% if users %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
-    <div class="btn-group">
-        <button class="btn btn-sm btn-danger" type="submit" form="batchForm" onclick="return $('.row-check:checked').length>0">🗑️ 删除选中</button>
+    {% if users %}
+    <div class="pagination">
+        <div class="btn-group">
+            <button class="btn btn-sm btn-danger" type="submit" form="batchForm">🗑️ 删除选中</button>
+        </div>
+        <div class="btn-group">
+            {% if cur_page > 1 %}
+                <a href="?page={{ cur_page-1 }}&search={{ search }}" class="btn btn-sm btn-secondary">← 上一页</a>
+            {% endif %}
+            <span class="page-info">{{ cur_page }} / {{ pages }}</span>
+            {% if cur_page < pages %}
+                <a href="?page={{ cur_page+1 }}&search={{ search }}" class="btn btn-sm btn-secondary">下一页 →</a>
+            {% endif %}
+        </div>
     </div>
-    <!-- 分页 -->
-    <div class="btn-group">
-        {% if cur_page > 1 %}
-            <a href="?page={{ cur_page-1 }}&search={{ search }}" class="btn btn-sm btn-secondary">← 上一页</a>
-        {% endif %}
-        <span style="padding:8px 12px;color:#64748b;font-size:13px">{{ cur_page }} / {{ pages }}</span>
-        {% if cur_page < pages %}
-            <a href="?page={{ cur_page+1 }}&search={{ search }}" class="btn btn-sm btn-secondary">下一页 →</a>
-        {% endif %}
-    </div>
-</div>
-{% endif %}
+    {% endif %}
 </form>
 
 <!-- SSE 日志区域 -->
-<div id="sse-log" style="margin-top:16px;display:none;" class="card"></div>
+<div id="sse-log" style="margin-top:16px;display:none;"></div>
+<div id="sse-summary" style="margin-top:10px;"></div>
+{% endblock %}
 
+{% block scripts %}
 <script>
 function toggleAll(cb) {
     document.querySelectorAll('.row-check').forEach(c => c.checked = cb.checked);
 }
 
-let currentSource = null;
-function triggerSign(phone, testMode) {
-    if (currentSource) currentSource.close();
-    const log = document.getElementById('sse-log');
-    log.style.display = 'block';
-    log.innerHTML = '<pre style="margin:0;background:transparent;border:none;padding:0">执行中...</pre>';
-
-    let url = '/sign/trigger?';
-    if (phone) url += 'phone=' + encodeURIComponent(phone) + '&';
-    if (testMode) url += 'test=1&';
-
-    currentSource = new EventSource(url);
-    let results = [];
-
-    currentSource.onmessage = function(e) {
-        const data = JSON.parse(e.data);
-        if (data.type === 'log') {
-            log.querySelector('pre').innerHTML += escapeHtml(data.message) + '\n';
-        } else if (data.type === 'info') {
-            log.querySelector('pre').innerHTML += 'ℹ️ ' + escapeHtml(data.message) + '\n';
-        } else if (data.type === 'error') {
-            log.querySelector('pre').innerHTML += '❌ ' + escapeHtml(data.message) + '\n';
-        } else if (data.type === 'done') {
-            results = data.results || [];
-            let succ = results.filter(r => r.status === 'success').length;
-            let fail = results.filter(r => r.status === 'fail').length;
-            log.querySelector('pre').innerHTML += `\n--- 完成: 成功 ${succ}, 失败 ${fail} ---\n`;
-            currentSource.close();
-        }
-    };
-    currentSource.onerror = function() { currentSource.close(); };
+function validateBatch() {
+    const n = document.querySelectorAll('.row-check:checked').length;
+    if (n === 0) { toast('请先勾选要删除的用户', 'error'); return false; }
+    return confirm('确定删除选中的 ' + n + ' 个用户？此操作不可恢复！');
 }
 
-function escapeHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-}
 </script>
 {% endblock %}

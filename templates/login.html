@@ -1,47 +1,33 @@
 {% extends 'base.html' %}
 {% block title %}登录 - 易班签到管理{% endblock %}
+{% block body_pre %}{% endblock %}
 {% block content %}
 <style>
-body{display:flex;align-items:center;justify-content:center;min-height:100vh}
-header{display:none}
-/* 覆盖浏览器自动填充样式 */
-input:-webkit-autofill,
-input:-webkit-autofill:hover,
-input:-webkit-autofill:focus,
-input:-webkit-autofill:active {
-    -webkit-box-shadow: 0 0 0 30px #0f172a inset !important;
-    -webkit-text-fill-color: #e2e8f0 !important;
-    caret-color: #e2e8f0 !important;
-    border-color: #334155 !important;
-}
-.login-input {
-    background: #0f172a !important;
-    color: #fff !important;
-    border: 1px solid #334155 !important;
-    caret-color: #fff !important;
-}
-.login-input:focus {
-    border-color: #3b82f6 !important;
-    background: #0f172a !important;
-    color: #fff !important;
-}
-.login-input::placeholder {
-    color: #64748b !important;
-}
+    /* 登录页隐藏全局 header */
+    header { display: none; }
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+        -webkit-box-shadow: 0 0 0 40px var(--bg-inset) inset !important;
+        -webkit-text-fill-color: var(--text) !important;
+        caret-color: var(--text) !important;
+        transition: background-color 9999s ease-out;
+    }
 </style>
-<div class="login-box">
-    <div class="card">
-        <h2>🔐 登录</h2>
-        <form method="post">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <label>用户名</label>
-            <input class="login-input" type="text" name="username" placeholder="admin" autofocus>
-            <label>密码</label>
-            <input class="login-input" type="password" name="password" placeholder="••••••">
-            <div style="margin-top:20px;">
-                <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">登录</button>
-            </div>
-        </form>
+<div class="login-wrap">
+    <div class="login-box">
+        <div class="card" style="padding:32px 28px;">
+            <h2>🔐 易班签到管理</h2>
+            <form method="post">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <label>用户名</label>
+                <input type="text" name="username" placeholder="admin" autofocus autocomplete="username">
+                <label>密码</label>
+                <input type="password" name="password" placeholder="••••••••" autocomplete="current-password">
+                <button type="submit" class="btn btn-primary" style="width:100%;margin-top:24px;min-height:46px;font-size:15px;">登 录</button>
+            </form>
+        </div>
+        <p class="muted" style="text-align:center;margin-top:16px;">易班自动签到系统管理后台</p>
     </div>
 </div>
 {% endblock %}

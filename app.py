@@ -6,11 +6,31 @@ import os
 import secrets
 import hashlib
 import time
+from datetime import datetime, timedelta
+from functools import wraps
+
+
+# 加载 .env
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 app = Flask(__name__)
-app.secret_key = db.get_secret_key()
+app.secret_key = os.environ.get("HOMEPAGE_SECRET_KEY") or db.get_secret_key()
 app.config['APPLICATION_ROOT'] = '/yiban'
-db.init_db()
+with app.app_context():
+    db.init_db()
+
+# Session cookie security
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["PERMANENT_SESSION_LIFETIME"] = 3600
+
+# Register DB teardown
+app.teardown_appcontext(db.close_db)
 
 # ========== CSRF ==========
 CSRF_TOKEN_NAME = '_csrf_token'
@@ -23,20 +43,22 @@ def generate_csrf_token():
 def validate_csrf_token():
     if request.method != 'POST':
         return True
-    token = request.form.get(CSRF_TOKEN_NAME, '')
+    token = request.form.get(CSRF_TOKEN_NAME, "") or request.headers.get("X-CSRFToken", "")
     return token and token == session.get(CSRF_TOKEN_NAME)
 
 app.jinja_env.globals['csrf_token'] = generate_csrf_token
 
 @app.before_request
 def csrf_protect():
+    # API 路由用 X-API-Key 鉴权，跳过 CSRF
+    if request.path.startswith('/api/'):
+        return
     if request.method == 'POST' and not validate_csrf_token():
         flash('安全验证失败，请重试', 'error')
         return redirect(request.referrer or url_for('index'))
 
 
 def login_required(f):
-    from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get('logged_in'):
@@ -78,6 +100,11 @@ def logout():
     return redirect(url_for('login'))
 
 
+@app.route('/health')
+def health():
+    return jsonify({"status": "ok", "service": "yiban-admin"})
+
+
 @app.route('/settings', methods=['GET', 'POST'])
 @login_required
 def settings():
@@ -105,7 +132,17 @@ def index():
     stats = db.get_stats()
     recent_logs = db.get_recent_logs(15)
     users = db.get_all_users()
-    return render_template('index.html', stats=stats, recent_logs=recent_logs, users=users)
+    # 今日状态横幅
+    if stats['today_success'] > 0:
+        banner = ('success', '✅', f"今日签到完成 · 成功 {stats['today_success']} 人")
+    elif stats['today_fail'] > 0:
+        banner = ('danger', '❌', f"今日有 {stats['today_fail']} 个失败，请检查通知配置")
+    elif stats['today_skip'] > 0:
+        banner = ('warning', '⏭️', '今日已跳过（未到签到时间或无需签到）')
+    else:
+        banner = ('muted', '⚪', '今日暂无签到记录')
+    return render_template('index.html', stats=stats, recent_logs=recent_logs,
+                           users=users, banner=banner)
 
 
 @app.route('/users')
@@ -132,7 +169,8 @@ def add_user():
             sendkey=request.form.get('sendkey', ''),
             address=request.form.get('address', ''),
             device_id=request.form.get('device_id', ''),
-            phone_model=request.form.get('phone_model', 'iPhone-15-Pro-Max')
+            phone_model=request.form.get('phone_model', 'iPhone-15-Pro-Max'),
+            success_notify=1 if request.form.get('success_notify') else 0
         )
         if ok:
             db.add_audit_log('add_user', f'添加用户 {request.form.get("phone", "")}', ip)
@@ -207,6 +245,7 @@ def edit_user(phone):
             val = request.form.get(f, '').strip()
             if val:
                 fields[f] = val
+        fields['success_notify'] = 1 if request.form.get('success_notify') else 0
         ok, msg = db.update_user(phone, **fields)
         if ok:
             db.add_audit_log('edit_user', f'编辑用户 {phone}', ip)
@@ -269,18 +308,56 @@ def sync_users():
 @login_required
 def logs():
     phone = request.args.get('phone', '').strip()
-    if phone:
-        logs = db.get_logs_by_phone(phone, 50)
-    else:
-        logs = db.get_recent_logs(50)
-    return render_template('logs.html', logs=logs, filter_phone=phone)
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except ValueError:
+        page = 1
+    per_page = 20
+    logs, total = db.get_logs_page(page, per_page, phone)
+    pages = (total + per_page - 1) // per_page or 1
+    return render_template('logs.html', logs=logs, filter_phone=phone,
+                           cur_page=page, pages=pages, total=total)
 
 
 @app.route('/calendar')
 @login_required
 def calendar():
     date_stats = db.get_date_stats(30)
-    return render_template('calendar.html', date_stats=date_stats)
+    stats_map = {d['date']: d for d in date_stats} if date_stats else {}
+
+    today = datetime.now().date()
+    start = today - timedelta(days=29)
+    start -= timedelta(days=start.weekday())  # 对齐到周一
+
+    days = []
+    cur = start
+    while cur <= today:
+        ds = cur.strftime('%Y-%m-%d')
+        st = stats_map.get(ds)
+        total = st['total'] if st else 0
+        if total > 0:
+            rate = round((st['success'] or 0) / total * 100)
+            if rate >= 100:
+                level = 'perfect'
+            elif rate >= 80:
+                level = 'high'
+            elif rate >= 50:
+                level = 'mid'
+            else:
+                level = 'low'
+        else:
+            rate = None
+            level = '0'
+        days.append({
+            'date': ds, 'day': cur.day, 'level': level, 'rate': rate,
+            'success': st['success'] if st else 0,
+            'fail': st['fail'] if st else 0,
+            'total': total,
+        })
+        cur += timedelta(days=1)
+
+    active_days = sum(1 for d in days if d['total'] > 0)
+    return render_template('calendar.html', days=days, active_days=active_days)
 
 
 @app.route('/calendar/date/<date_str>')
@@ -299,13 +376,24 @@ def notify_config():
         email_enable = 1 if request.form.get('email_enable') else 0
         serverchan_key = request.form.get('serverchan_key', '').strip()
         serverchan_enable = 1 if request.form.get('serverchan_enable') else 0
-        db.set_notify_config(qq, auth_code, email_enable, serverchan_key, serverchan_enable)
+        summary_recipient = request.form.get('summary_recipient', '').strip()
+        template_a = request.form.get('template_a', '').strip()
+        template_b = request.form.get('template_b', '').strip()
+        template_success = request.form.get('template_success', '').strip()
+        db.set_notify_config(qq, auth_code, email_enable, serverchan_key, serverchan_enable,
+                             summary_recipient, template_a, template_b, template_success)
         flash('通知配置已保存', 'success')
         return redirect(url_for('notify_config'))
 
     notify = db.get_notify_config()
-    return render_template('mail.html', notify=notify)
-
+    # 汇总通知和Server酱默认启用（首次）
+    if notify and notify['serverchan_enable'] is None:
+        db.set_notify_config(notify['qq'], notify['auth_code'], notify['email_enable'] or 1, notify['serverchan_key'], 1)
+        notify = db.get_notify_config()
+    first_user_qq = db.get_db().execute("SELECT qq FROM users WHERE enable = 1 ORDER BY id ASC LIMIT 1").fetchone()
+    first_user_qq = first_user_qq[0] if first_user_qq else ''
+    success_notify_count = db.get_db().execute("SELECT COUNT(*) FROM users WHERE success_notify = 1 AND enable = 1").fetchone()[0]
+    return render_template('mail.html', notify=notify, success_notify_count=success_notify_count, first_user_qq=first_user_qq)
 
 @app.route('/notify/test_email', methods=['POST'])
 @login_required
@@ -328,6 +416,46 @@ def notify_test_serverchan():
     return jsonify({"ok": ok, "message": msg})
 
 
+@app.route('/notify/test_template', methods=['POST'])
+@login_required
+def notify_test_template():
+    qq = request.form.get('qq', '').strip()
+    auth_code = request.form.get('auth_code', '').strip()
+    template_a = request.form.get('template_a', '').strip()
+    template_b = request.form.get('template_b', '').strip()
+    template_success = request.form.get('template_success', '').strip()
+    if not qq or not auth_code:
+        return jsonify({"ok": False, "message": "请填写QQ和授权码"})
+    ok, msg = yiban_sync.test_template(qq, auth_code, template_a, template_b, template_success)
+    return jsonify({"ok": ok, "message": msg})
+
+
+@app.route('/api/stats')
+@login_required
+def api_stats():
+    """获取实时统计数据"""
+    return jsonify(db.get_stats())
+
+
+@app.route('/api/logs/delete/<int:log_id>', methods=['POST'])
+@login_required
+def api_delete_log(log_id):
+    """删除单条签到记录"""
+    deleted = db.delete_sign_log(log_id)
+    if deleted:
+        db.add_audit_log('delete_log', f'删除签到记录 #{log_id}', request.remote_addr or 'unknown')
+    return jsonify({"ok": deleted})
+
+
+@app.route('/api/logs/clear', methods=['POST'])
+@login_required
+def api_clear_logs():
+    """清空所有签到记录"""
+    n = db.clear_sign_logs()
+    db.add_audit_log('clear_logs', f'清空全部签到记录（{n} 条）', request.remote_addr or 'unknown')
+    return jsonify({"ok": True, "deleted": n})
+
+
 # 子路径部署中间件
 class PrefixMiddleware:
     def __init__(self, app, prefix='/yiban'):
@@ -336,11 +464,67 @@ class PrefixMiddleware:
 
     def __call__(self, environ, start_response):
         environ['SCRIPT_NAME'] = self.prefix
+        path = environ.get('PATH_INFO', '')
+        if path.startswith(self.prefix):
+            environ['PATH_INFO'] = path[len(self.prefix):] or '/'
         return self.app(environ, start_response)
-
-
 app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix='/yiban')
 
 
+
+
+
+# ========== API 日志接口（供签到脚本调用）==========
+API_KEY = os.environ.get("YIBAN_API_KEY") or "yiban-cron-2026"
+
+def api_key_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key = request.headers.get("X-API-Key") or request.args.get("api_key")
+        if key != API_KEY:
+            return jsonify({"ok": False, "message": "Unauthorized"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+@app.route('/api/logs/add', methods=['POST'])
+@api_key_required
+def api_add_log():
+    """签到脚本写入单条签到记录"""
+    data = request.get_json(force=True)
+    phone = data.get("phone", "")
+    status = data.get("status", "")
+    message = data.get("message", "")
+    batch_id = data.get("batch_id", "")
+    if not phone or not status:
+        return jsonify({"ok": False, "message": "phone and status required"}), 400
+    log_id = db.add_sign_log(phone, status, message, batch_id)
+    return jsonify({"ok": True, "log_id": log_id})
+
+@app.route('/api/logs/batch', methods=['POST'])
+@api_key_required
+def api_add_logs_batch():
+    """签到脚本批量写入签到记录"""
+    data = request.get_json(force=True)
+    logs = data.get("logs", [])
+    if not logs:
+        return jsonify({"ok": False, "message": "logs array required"}), 400
+    count = 0
+    for log in logs:
+        phone = log.get("phone", "")
+        status = log.get("status", "")
+        message = log.get("message", "")
+        batch_id = log.get("batch_id", "")
+        if phone and status:
+            db.add_sign_log(phone, status, message, batch_id)
+            count += 1
+    return jsonify({"ok": True, "count": count})
+
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    try:
+        _n = db.cleanup_old_logs(90)
+        if _n:
+            print(f'[startup] 已清理 {_n} 条过期签到日志（保留 90 天）')
+    except Exception as e:
+        print(f'[startup] 日志清理失败: {e}')
+    app.run(host='0.0.0.0', port=5000, debug=False)

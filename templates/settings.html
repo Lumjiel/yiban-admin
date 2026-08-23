@@ -1,20 +1,19 @@
 {% extends 'base.html' %}
 {% block title %}设置 - 易班签到管理{% endblock %}
 {% block content %}
-<div class="card" style="max-width:400px;">
+<div class="card" style="max-width:420px;">
     <h2>修改密码</h2>
-    <p style="color:#64748b;font-size:13px;margin-bottom:16px;">当前用户: {{ username }}</p>
+    <p class="muted" style="margin-bottom:8px;">当前用户: {{ username }}</p>
     <form method="post">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <label>原密码</label>
-        <input type="password" name="old_password" required>
+        <input type="password" name="old_password" required autocomplete="current-password">
         <label>新密码</label>
-        <input type="password" name="new_password" required>
+        <input type="password" name="new_password" required minlength="6" autocomplete="new-password">
         <label>确认新密码</label>
-        <input type="password" name="confirm_password" required>
-        <div style="margin-top:20px;">
-            <button type="submit" class="btn btn-success">保存</button>
-        </div>
+        <input type="password" name="confirm_password" required minlength="6" autocomplete="new-password"
+               oninput="const n=document.querySelector('input[name=new_password]');this.setCustomValidity(this.value!==n.value?'两次输入不一致':'')">
+        <button type="submit" class="btn btn-success" style="margin-top:22px;">保存</button>
     </form>
 </div>
 {% endblock %}
