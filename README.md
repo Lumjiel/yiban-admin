@@ -1,10 +1,10 @@
 # yiban-admin — 易班签到管理面板
 
-**易班校本化晚点签到的 Web 管理面板。用户管理、签到触发、通知配置。**
+**易班校本化晚点签到的 Web 管理面板。用户管理、一键签到、热力图日历、多通道通知、移动端适配。**
 
-*Flask · SQLite · Server酱 · 邮件通知*
+*Flask · SQLite · Server酱 · QQ 邮箱 · SSE 实时日志*
 
-[快速开始](#-快速开始) · [功能](#-功能) · [项目结构](#-项目结构) · [免责声明](#-免责声明)
+[快速开始](#-快速开始) · [功能](#-功能) · [可靠性设计](#-可靠性设计) · [项目结构](#-项目结构) · [免责声明](#-免责声明)
 
 ---
 
@@ -12,10 +12,19 @@
 
 | 模块 | 功能 |
 |------|------|
-| **用户管理** | 添加/删除/编辑签到用户，启用/禁用 |
-| **签到触发** | 手动触发签到，查看签到日志 |
-| **通知配置** | Server酱 / 邮件通知开关，分类通知策略 |
-| **安全** | CSRF 保护、登录鉴权、Session 管理 |
+| **概览面板** | 今日状态横幅（完成/失败/跳过一眼可见）、实时统计、快捷操作、SSE 实时签到日志 |
+| **用户管理** | 添加/编辑/删除/批量导入导出、启用/禁用、单用户签到与测试登录、搜索、分页 |
+| **签到日历** | 近 30 天热力图（按周对齐、五档色阶）、每日明细下钻 |
+| **签到日志** | 全量分页浏览、按手机号筛选、单条删除、批次追溯 |
+| **通知配置** | Server酱 / QQ 邮箱双通道、A/B 类失败分级通知、自定义消息模板、在线测试 |
+| **安全** | CSRF 全局保护、登录鉴权 + 限流、Session 管理（HttpOnly/Secure/SameSite）、敏感操作审计日志 |
+
+### UI 特性
+
+- 深色主题设计系统（CSS 变量统一色彩/圆角/阴影）
+- **移动端适配**：≤640px 表格自动转卡片布局、表单单列、触摸目标 ≥44px
+- Toast 通知替代原生 alert、按钮 loading 态防重复提交
+- 毛玻璃 sticky 导航、统计卡片微交互
 
 ---
 
@@ -25,26 +34,42 @@
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 初始化数据库
-python app.py
-# 自动创建 data.db
-
-# 3. 启动
+# 2. 启动（自动初始化 SQLite 数据库）
 python app.py
 # 访问 http://127.0.0.1:5000/yiban
+# 默认账号 admin / admin123（登录后请立即修改）
+```
+
+### 部署（子路径反代）
+
+内置 `PrefixMiddleware`，应用挂载在 `/yiban` 前缀下，配合 nginx 反代即可：
+
+```nginx
+location /yiban/ {
+    proxy_pass http://127.0.0.1:5000/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_buffering off;   # SSE 实时日志必需
+}
+```
+
+### 每日兜底校验（可选但强烈建议）
+
+```bash
+# cron：每天 08:00 检查当天是否有签到记录，没有则 ServerChan 告警
+0 8 * * * cd /path/to/yiban-admin && python3 check_daily.py >> /var/log/yiban-check.log 2>&1
 ```
 
 ---
 
-## ⚙️ 配置
+## 🛡️ 可靠性设计
 
-| 文件 | 说明 |
+| 机制 | 说明 |
 |------|------|
-| `app.py` | Flask 主入口 |
-| `db.py` | SQLite 数据库操作 |
-| `yiban_sync.py` | 签到核心逻辑 |
-| `yiban_sync_server.py` | 签到服务（独立进程） |
-| `templates/` | Jinja2 前端模板 |
+| **兜底告警** | `check_daily.py` 每日检查签到记录，静默失败（服务器停机/脚本崩溃）时主动推送 |
+| **操作审计** | 清空/删除日志等敏感操作写入 `audit_log`（操作 + 条数 + IP），事后可追溯 |
+| **日志保留策略** | 签到日志自动清理 90 天前的记录（服务启动 + 每日校验双触发） |
+| **时区修正** | 统计口径按北京时间换算 UTC 截断点，避免"早上签的到下午才算数" |
 
 ---
 
@@ -52,13 +77,13 @@ python app.py
 
 ```
 yiban-admin/
-├── app.py                  # Flask 主入口（路由 + 视图）
-├── db.py                   # SQLite 数据库层
-├── yiban_sync.py           # 签到核心逻辑
-├── yiban_sync_server.py    # 签到服务（独立进程）
-├── templates/              # Jinja2 模板
+├── app.py            # Flask 主入口（路由 + CSRF + PrefixMiddleware）
+├── db.py             # SQLite 数据层（用户/日志/通知/审计/统计）
+├── yiban_sync.py     # 签到核心逻辑（邮件/ServerChan 测试与同步）
+├── check_daily.py    # 每日兜底校验脚本（cron 调用）
+├── templates/        # Jinja2 模板（响应式设计系统）
 ├── requirements.txt
-└── .gitignore
+└── .gitignore        # 排除 .env / *.db / 密钥文件
 ```
 
 ---
