@@ -12,7 +12,7 @@
         <tbody>
         {% for log in logs %}
             <tr>
-                <td data-label="时间">{{ log.created_at.split(' ')[1] if ' ' in log.created_at else log.created_at }}</td>
+                <td data-label="时间">{{ log.created_at_bj.split(' ')[1] if ' ' in log.created_at_bj else log.created_at_bj }}</td>
                 <td data-label="手机号">{{ log.phone }}</td>
                 <td data-label="状态"><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
                 <td data-label="详情" class="wrap">{{ log.message }}</td>

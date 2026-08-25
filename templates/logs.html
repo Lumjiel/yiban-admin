@@ -26,7 +26,7 @@
         <tbody>
             {% for log in logs %}
             <tr>
-                <td data-label="时间">{{ log.created_at }}</td>
+                <td data-label="时间">{{ log.created_at_bj }}</td>
                 <td data-label="手机号"><a href="?phone={{ log.phone }}" style="color:var(--primary);text-decoration:none;">{{ log.phone }}</a></td>
                 <td data-label="状态"><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
                 <td data-label="详情" class="wrap">{{ log.message }}</td>

@@ -27,8 +27,9 @@ def send_serverchan(key: str, title: str, msg: str):
 def main() -> int:
     now_bj = datetime.utcnow() + timedelta(hours=8)
     date_str = now_bj.strftime('%Y-%m-%d')
-    # created_at 存 UTC；北京时间当日 0 点对应的 UTC 截断点
-    cutoff = (datetime.utcnow() - timedelta(hours=8)).strftime('%Y-%m-%d') + ' 00:00:00'
+    # created_at 存 UTC。北京时间当日 0 点 = UTC 前一天 16:00
+    bj_midnight = datetime(now_bj.year, now_bj.month, now_bj.day)
+    cutoff = (bj_midnight - timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
 
     con = sqlite3.connect(f'file:{DB}?mode=ro', uri=True)
     con.row_factory = sqlite3.Row

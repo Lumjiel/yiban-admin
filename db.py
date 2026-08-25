@@ -547,7 +547,7 @@ def add_sign_log(phone: str, status: str, message: str = '', batch_id: str = '')
 
 def get_recent_logs(limit: int = 100) -> list:
     conn = get_db()
-    rows = conn.execute("SELECT * FROM sign_logs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    rows = conn.execute("SELECT *, datetime(created_at, '+8 hours') as created_at_bj FROM sign_logs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     conn.close()
     return rows
 
@@ -562,32 +562,55 @@ def get_logs_by_phone(phone: str, limit: int = 30) -> list:
 
 def get_logs_by_date(date_str: str) -> list:
     conn = get_db()
-    rows = conn.execute("SELECT * FROM sign_logs WHERE created_at LIKE ? ORDER BY id ASC",
-                        (f"{date_str}%",)).fetchall()
+    # date_str 是北京时间日期；created_at 存 UTC，换算成 UTC 区间查询
+    try:
+        d = datetime.strptime(date_str, '%Y-%m-%d')
+    except ValueError:
+        return []
+    start_utc = (d - timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
+    end_utc = (d + timedelta(hours=16)).strftime('%Y-%m-%d %H:%M:%S')
+    rows = conn.execute(
+        "SELECT *, datetime(created_at, '+8 hours') as created_at_bj "
+        "FROM sign_logs WHERE created_at >= ? AND created_at < ? ORDER BY id ASC",
+        (start_utc, end_utc)).fetchall()
     conn.close()
     return rows
 
 
 def get_date_stats(days: int = 30) -> list:
     conn = get_db()
+    # start 是北京时间日期；按北京时间日期分组（created_at 存 UTC）
     start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
     rows = conn.execute("""
-        SELECT DATE(created_at) as date,
+        SELECT DATE(created_at, '+8 hours') as date,
                COUNT(DISTINCT CASE WHEN status='success' THEN phone END) as success,
                COUNT(DISTINCT CASE WHEN status='fail' THEN phone END) as fail,
                COUNT(DISTINCT phone) as total
-        FROM sign_logs WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY date ASC
+        FROM sign_logs WHERE DATE(created_at, '+8 hours') >= ?
+        GROUP BY DATE(created_at, '+8 hours') ORDER BY date ASC
     """, (start,)).fetchall()
     conn.close()
     return rows
+
+
+def _bj_day_start_utc(dt=None) -> str:
+    """created_at 存 UTC。返回北京时间某日 00:00 对应的 UTC 时刻字符串。
+
+    Beijing day D 00:00 = UTC (D-1) 16:00。
+    """
+    base = dt or datetime.utcnow()
+    bj = base + timedelta(hours=8)
+    start_bj = datetime(bj.year, bj.month, bj.day)
+    start_utc = start_bj - timedelta(hours=8)
+    return start_utc.strftime('%Y-%m-%d %H:%M:%S')
 
 
 # ========== Stats ==========
 
 def get_stats() -> dict:
     conn = get_db()
-    # 注意：created_at 存的是 UTC，需换算成"北京时间当日 0 点"对应的 UTC 截断点
-    today_cutoff = (datetime.utcnow() - timedelta(hours=8)).strftime('%Y-%m-%d') + ' 00:00:00'
+    # created_at 存 UTC；用北京时间当日 0 点对应的 UTC 时刻作截断点
+    today_cutoff = _bj_day_start_utc()
     week_cutoff = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
 
     total_users = conn.execute("SELECT COUNT(*) FROM users WHERE enable = 1").fetchone()[0]
@@ -672,7 +695,7 @@ def get_logs_page(page: int = 1, per_page: int = 20, phone: str = '') -> tuple:
     total = conn.execute(f'SELECT COUNT(*) FROM sign_logs {where}', params).fetchone()[0]
     offset = (page - 1) * per_page
     logs = conn.execute(
-        f'SELECT * FROM sign_logs {where} ORDER BY id DESC LIMIT ? OFFSET ?',
+        f'SELECT *, datetime(created_at, \'+8 hours\') as created_at_bj FROM sign_logs {where} ORDER BY id DESC LIMIT ? OFFSET ?',
         params + [per_page, offset]).fetchall()
     conn.close()
     return logs, total
