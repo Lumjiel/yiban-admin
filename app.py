@@ -475,7 +475,7 @@ app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix='/yiban')
 
 
 # ========== API 日志接口（供签到脚本调用）==========
-API_KEY = os.environ.get("YIBAN_API_KEY") or "yiban-cron-2026"
+API_KEY = os.environ.get("YIBAN_API_KEY")  # 无环境变量则全部拒绝，绝不兜底
 
 def api_key_required(f):
     @wraps(f)
