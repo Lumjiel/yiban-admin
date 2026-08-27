@@ -3,7 +3,7 @@
 每日签到兜底校验
 - 检查今天（北京时间）是否有签到记录，没有则通过 ServerChan 发告警
 - 顺带清理超过 90 天的过期日志
-- 由 cron 每天 08:00 调用：0 8 * * * cd /opt/yiban-admin && /usr/bin/python3 check_daily.py >> /var/log/yiban-check.log 2>&1
+- 已弃用：原 08:00 纯告警逻辑，已由 remedy.py（07:30 窗口内兜底补签）替代，本脚本不再被 cron 调度。
 """
 import sqlite3
 import urllib.request
