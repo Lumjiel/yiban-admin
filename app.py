@@ -268,7 +268,11 @@ def delete_user(phone):
 @app.route('/user/<phone>/toggle', methods=['POST'])
 @login_required
 def toggle_user(phone):
+    ip = request.remote_addr or 'unknown'
     db.toggle_user(phone)
+    u = db.get_user(phone)
+    state = '启用' if u and u['enable'] else '禁用'
+    db.add_audit_log('toggle_user', f'{state}用户 {phone}', ip)
     return redirect(url_for('user_list'))
 
 
@@ -279,7 +283,7 @@ def batch_delete_users():
     phones = request.form.getlist('phones')
     if phones:
         db.batch_delete_users(phones)
-        db.add_audit_log('batch_delete', f'批量删除 {len(phones)} 个用户', ip)
+        db.add_audit_log('batch_delete', f'批量删除 {len(phones)} 个用户: ' + ', '.join(phones), ip)
         flash(f'已删除 {len(phones)} 个用户', 'success')
     return redirect(url_for('user_list'))
 
@@ -390,9 +394,13 @@ def notify_config():
     if notify and notify['serverchan_enable'] is None:
         db.set_notify_config(notify['qq'], notify['auth_code'], notify['email_enable'] or 1, notify['serverchan_key'], 1)
         notify = db.get_notify_config()
-    first_user_qq = db.get_db().execute("SELECT qq FROM users WHERE enable = 1 ORDER BY id ASC LIMIT 1").fetchone()
-    first_user_qq = first_user_qq[0] if first_user_qq else ''
-    success_notify_count = db.get_db().execute("SELECT COUNT(*) FROM users WHERE success_notify = 1 AND enable = 1").fetchone()[0]
+    conn = db.get_db()
+    try:
+        row = conn.execute("SELECT qq FROM users WHERE enable = 1 ORDER BY id ASC LIMIT 1").fetchone()
+        first_user_qq = row[0] if row else ''
+        success_notify_count = conn.execute("SELECT COUNT(*) FROM users WHERE success_notify = 1 AND enable = 1").fetchone()[0]
+    finally:
+        conn.close()
     return render_template('mail.html', notify=notify, success_notify_count=success_notify_count, first_user_qq=first_user_qq)
 
 @app.route('/notify/test_email', methods=['POST'])

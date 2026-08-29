@@ -48,14 +48,8 @@
                         <button class="btn btn-sm btn-success" onclick="triggerSign('{{ u.phone }}', false, this); return false;">签到</button>
                         <button class="btn btn-sm btn-warning" onclick="triggerSign('{{ u.phone }}', true, this); return false;">测试</button>
                         <a href="{{ url_for('edit_user', phone=u.phone) }}" class="btn btn-sm btn-primary">编辑</a>
-                        <form method="post" action="{{ url_for('toggle_user', phone=u.phone) }}" style="display:inline" onsubmit="return confirm('{{ '禁用' if u.enable else '启用' }} {{ u.phone }}？')">
-                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                            <button class="btn btn-sm btn-{{ 'warning' if u.enable else 'success' }}" type="submit">{{ '禁用' if u.enable else '启用' }}</button>
-                        </form>
-                        <form method="post" action="{{ url_for('delete_user', phone=u.phone) }}" style="display:inline" onsubmit="return confirm('删除 {{ u.phone }}?')">
-                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                            <button class="btn btn-sm btn-danger" type="submit">删</button>
-                        </form>
+                        <button class="btn btn-sm btn-{{ 'warning' if u.enable else 'success' }}" type="submit" form="toggle-{{ u.phone }}" onclick="return confirm('{{ '禁用' if u.enable else '启用' }} {{ u.phone }}？')">{{ '禁用' if u.enable else '启用' }}</button>
+                        <button class="btn btn-sm btn-danger" type="submit" form="del-{{ u.phone }}" onclick="return confirm('删除 {{ u.phone }}?')">删</button>
                     </td>
                 </tr>
             {% endfor %}
@@ -85,6 +79,10 @@
     {% endif %}
 </form>
 
+{% for u in users %}
+<form id="toggle-{{ u.phone }}" method="post" action="{{ url_for('toggle_user', phone=u.phone) }}" style="display:none"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"></form>
+<form id="del-{{ u.phone }}" method="post" action="{{ url_for('delete_user', phone=u.phone) }}" style="display:none"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"></form>
+{% endfor %}
 <!-- SSE 日志区域 -->
 <div id="sse-log" style="margin-top:16px;display:none;"></div>
 <div id="sse-summary" style="margin-top:10px;"></div>

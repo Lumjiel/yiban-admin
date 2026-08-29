@@ -10,6 +10,7 @@
         <a href="{{ url_for('logs') }}" class="btn btn-sm btn-secondary">清除</a>
         {% endif %}
     </form>
+    <button class="btn btn-sm btn-danger" onclick="clearLogs()">🗑️ 清空全部</button>
 </div>
 <div class="card" style="padding:0;overflow:hidden;">
     <div class="table-wrap">
@@ -21,6 +22,7 @@
                 <th>状态</th>
                 <th>详情</th>
                 <th>批次</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
@@ -31,10 +33,11 @@
                 <td data-label="状态"><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
                 <td data-label="详情" class="wrap">{{ log.message }}</td>
                 <td data-label="批次"><span class="muted">{{ log.batch_id }}</span></td>
+                <td data-label="" class="no-label" style="width:44px"><button class="btn btn-sm btn-danger" onclick="deleteLog({{ log.id }}, this)">✕</button></td>
             </tr>
             {% endfor %}
             {% if not logs %}
-            <tr><td colspan="5" class="empty">暂无记录</td></tr>
+            <tr><td colspan="6" class="empty">暂无记录</td></tr>
             {% endif %}
         </tbody>
     </table>
@@ -54,3 +57,18 @@
     </div>
 </div>
 {% endblock %}
+{% block scripts %}
+<script>
+function deleteLog(logId, btn) {
+    if (!confirm('删除这条记录?')) return;
+    fetch("{{ url_for('api_delete_log', log_id=0) }}".replace('/0/', '/' + logId + '/'), {method:'POST', headers:{'X-CSRFToken': csrfToken}})
+        .then(r => r.json()).then(d => { if (d.ok) { btn.closest('tr').remove(); toast('已删除', 'success'); } });
+}
+function clearLogs() {
+    if (!confirm('清空所有签到记录? 此操作不可恢复!')) return;
+    fetch("{{ url_for('api_clear_logs') }}", {method:'POST', headers:{'X-CSRFToken': csrfToken}})
+        .then(r => r.json()).then(d => { if (d.ok) location.reload(); });
+}
+</script>
+{% endblock %}
+
