@@ -58,6 +58,24 @@ def csrf_protect():
         return redirect(request.referrer or url_for('index'))
 
 
+def _safe_sync(action_detail: str, ip: str = 'unknown') -> None:
+    """
+    调 yiban_sync.sync_to_server() 写 user_data.py。
+    失败不抛错，只 audit + 打印日志（admin 路由已经返回了响应，无法再 flash 错误给用户，
+    但前台会触发后续的 check_consistency.py 检测出不一致并 ServerChan 告警）。
+    """
+    try:
+        ok, msg = yiban_sync.sync_to_server()
+        if not ok:
+            db.add_audit_log('sync_fail', f'{action_detail} 后同步失败: {msg}', ip)
+            print(f'[sync_fail] {action_detail}: {msg}', flush=True)
+    except Exception as e:
+        db.add_audit_log('sync_fail', f'{action_detail} 后同步异常: {e}', ip)
+        print(f'[sync_fail] {action_detail} exception: {e}', flush=True)
+
+
+
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -174,6 +192,7 @@ def add_user():
         )
         if ok:
             db.add_audit_log('add_user', f'添加用户 {request.form.get("phone", "")}', ip)
+            _safe_sync(f'add_user {request.form.get("phone", "")}', ip)
             flash(msg, 'success')
             return redirect(url_for('user_list'))
         else:
@@ -249,6 +268,7 @@ def edit_user(phone):
         ok, msg = db.update_user(phone, **fields)
         if ok:
             db.add_audit_log('edit_user', f'编辑用户 {phone}', ip)
+            _safe_sync(f'edit_user {phone}', ip)
         flash(msg, 'success' if ok else 'error')
         return redirect(url_for('user_list'))
 
@@ -261,6 +281,7 @@ def delete_user(phone):
     ip = request.remote_addr or 'unknown'
     db.delete_user(phone)
     db.add_audit_log('delete_user', f'删除用户 {phone}', ip)
+    _safe_sync(f'delete_user {phone}', request.remote_addr or 'unknown')
     flash(f'已删除用户 {phone}', 'success')
     return redirect(url_for('user_list'))
 
@@ -273,6 +294,7 @@ def toggle_user(phone):
     u = db.get_user(phone)
     state = '启用' if u and u['enable'] else '禁用'
     db.add_audit_log('toggle_user', f'{state}用户 {phone}', ip)
+    _safe_sync(f'toggle_user {phone} -> {state}', ip)
     return redirect(url_for('user_list'))
 
 
@@ -284,6 +306,7 @@ def batch_delete_users():
     if phones:
         db.batch_delete_users(phones)
         db.add_audit_log('batch_delete', f'批量删除 {len(phones)} 个用户: ' + ', '.join(phones), ip)
+        _safe_sync(f'batch_delete {len(phones)} users: ' + ', '.join(phones), ip)
         flash(f'已删除 {len(phones)} 个用户', 'success')
     return redirect(url_for('user_list'))
 
@@ -386,6 +409,8 @@ def notify_config():
         template_success = request.form.get('template_success', '').strip()
         db.set_notify_config(qq, auth_code, email_enable, serverchan_key, serverchan_enable,
                              summary_recipient, template_a, template_b, template_success)
+        ip = request.remote_addr or 'unknown'
+        _safe_sync('notify_config update (mail templates / serverchan / smtp)', ip)
         flash('通知配置已保存', 'success')
         return redirect(url_for('notify_config'))
 
