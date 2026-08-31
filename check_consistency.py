@@ -7,16 +7,18 @@ check_consistency.py — 签到用户数据一致性检查
 
 逻辑：
   1. 读 yiban-admin.db 的 users 表中 enable=1 的 phone 集合 → db_phones
-  2. AST 解析 /opt/yiban/yiban/config/user_data.py 的 user_data 列表 → file_phones
+  2. 执行签到脚本的 SQLite 加载器，取其实际会加载的 phone 集合 → file_phones
+     （2026-08-31 起 user_data.py 是加载器而非静态数据，无法再用 AST 解析）
   3. 对称差非空 → 不一致：
      - 写一条 sync_consistency_fail audit
      - 调 yiban_sync.sync_to_server() 自动修复
      - 发 ServerChan 告警
   4. 一致 → log 一行 OK 退出 0
 
-为什么用 AST 而不是 import：
-  user_data.py 是用户数据文件，git ignored，理论上不会含恶意代码，
-  但 AST 解析不执行 import 副作用（万一以后有人手贱加 import），更稳。
+检查语义的变化（2026-08-31 改造）：
+  改造前：比对「SQLite」与「user_data.py 静态快照」两份数据是否一致。
+  改造后：两者同源，比对退化为「加载器是否正常工作」——
+          数据库不可用导致加载器回退空列表时，db 有值而加载器为空，立即告警。
 
 调试：
   --dry-run  只检测 + 打印，不调 sync、不发 ServerChan、不写 audit
@@ -24,7 +26,9 @@ check_consistency.py — 签到用户数据一致性检查
 import sys
 import os
 import ast
+import json
 import sqlite3
+import subprocess
 import urllib.request
 import urllib.parse
 import argparse
@@ -34,6 +38,8 @@ from pathlib import Path
 ADMIN_DIR = Path(__file__).parent
 DB_PATH = ADMIN_DIR / "yiban-admin.db"
 USER_DATA_PATH = Path("/opt/yiban/yiban/config/user_data.py")
+SIGN_DIR = "/opt/yiban"
+SIGN_PYTHON = "/opt/yiban/.venv/bin/python"
 
 
 def bj_now() -> datetime:
@@ -51,28 +57,39 @@ def get_db_phones() -> set:
 
 
 def get_file_phones() -> set:
-    """AST 解析 user_data.py 取 Phone 集合（不执行代码）"""
-    src = USER_DATA_PATH.read_text(encoding="utf-8")
-    tree = ast.parse(src, filename=str(USER_DATA_PATH))
+    """执行签到脚本的 SQLite 加载器，取实际会参与签到的手机号。
 
-    user_data = None
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "user_data":
-                    user_data = node.value
+    2026-08-31 改造后 user_data.py 不再是静态数据文件，而是 SQLite 加载器，
+    已无法用 AST 解析出 user_data 列表，改为真正跑一次加载逻辑。
 
-    if user_data is None or not isinstance(user_data, ast.List):
-        raise ValueError("user_data.py 未找到 user_data = [...] 定义")
+    检查语义随之变化：从「两份数据是否一致」变成「加载器是否正常工作」——
+    若数据库不可用导致加载器回退到空列表，db_phones 有值而这里为空，
+    会立即判定不一致并告警，正是需要抓的故障。
+    """
+    code = (
+        "import json;"
+        "from yiban.config.user_data import user_data;"
+        "print(json.dumps([u['Phone'] for u in user_data]))"
+    )
+    proc = subprocess.run(
+        [SIGN_PYTHON, "-c", code],
+        cwd=SIGN_DIR, capture_output=True, text=True, timeout=60,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "签到加载器执行失败: " + (proc.stderr or proc.stdout).strip()[-300:]
+        )
 
-    phones = set()
-    for item in user_data.elts:
-        if isinstance(item, ast.Dict):
-            for k, v in zip(item.keys, item.values):
-                if (isinstance(k, ast.Constant) and k.value == "Phone"
-                        and isinstance(v, ast.Constant)):
-                    phones.add(str(v.value))
-    return phones
+    line = ""
+    for raw in proc.stdout.splitlines():
+        raw = raw.strip()
+        if raw.startswith("["):
+            line = raw
+    if not line:
+        raise RuntimeError("未能从加载器输出中解析手机号列表")
+
+    return set(json.loads(line))
+
 
 
 def get_serverchan_key() -> str:

@@ -85,15 +85,15 @@ def generate_user_data_content() -> str:
 
 
 def sync_to_server() -> tuple:
-    """同步用户数据到签到脚本的 user_data.py（本地写入）"""
-    content = generate_user_data_content()
-    try:
-        os.makedirs(os.path.dirname(USER_DATA_PATH), exist_ok=True)
-        with open(USER_DATA_PATH, "w", encoding="utf-8") as f:
-            f.write(content)
-        return True, "同步成功"
-    except Exception as e:
-        return False, "同步失败: " + str(e)
+    """空实现：签到脚本已改为直读 SQLite（2026-08-31 改造），不再生成 user_data.py。
+
+    后台 _safe_sync / /sign/sync / trigger_sign_stream 仍在调用本函数，
+    这里保留签名并直接返回成功 —— 一旦恢复写文件行为，就会把
+    /opt/yiban/yiban/config/user_data.py 覆盖成静态数据，
+    破坏其中的 SQLite 加载器，签到将退回「读过期快照」的老问题。
+    """
+    return True, "无需同步（签到脚本已直读 SQLite）"
+
 
 
 def trigger_sign_stream(phone: Optional[str] = None, test_mode: bool = False) -> Generator:
