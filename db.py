@@ -219,6 +219,9 @@ def get_admin_username() -> str:
 
 # ========== 输入过滤 ==========
 
+# 常见连字符/破折号变体 -> 标准 ASCII 短横，防止从网页/文档复制时混入不可见字符
+_HYPHEN_RE = re.compile(r'[\u00ad\u2010-\u2014\u2212\uff0d]')
+
 def sanitize_str(value: str, max_len: int = 100) -> str:
     """过滤危险字符，防止注入"""
     if not value:
@@ -227,6 +230,9 @@ def sanitize_str(value: str, max_len: int = 100) -> str:
     value = value.replace('\n', '').replace('\r', '').replace("'", '').replace('"', '').replace('\\', '')
     # 移除控制字符
     value = re.sub(r'[\x00-\x1f\x7f]', '', value)
+    # 归一化连字符：不间断连字符(U+2011)/破折号等变体统一成 ASCII 短横，
+    # 否则易班接口按 UUID 校验 device_id 会拒签(复制粘贴常见带入)
+    value = _HYPHEN_RE.sub('-', value)
     return value[:max_len]
 
 
