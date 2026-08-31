@@ -55,6 +55,8 @@ location /yiban/ {
 
 ### 双链路架构：主签到 + 窗口内兜底补签
 
+> 后台「手动签到」按钮会向 `scripts/start.py` 子进程注入 `YIBAN_FORCE=1`，绕过本地时间窗、直接对易班发起真实请求（由服务器侧决定能否签上）。
+
 生产环境由两条**互不依赖**的 cron 链路保障（缺一不可）：
 
 ```bash
@@ -99,7 +101,7 @@ location /yiban/ {
 yiban-admin/
 ├── app.py            # Flask 主入口（路由 + CSRF + PrefixMiddleware）
 ├── db.py             # SQLite 数据层（用户/日志/通知/审计/统计）
-├── yiban_sync.py     # 签到核心逻辑（邮件/ServerChan 测试与同步）
+├── yiban_sync.py     # 签到核心逻辑（邮件/ServerChan 测试与通知；sync_to_server 已置空，数据源改由签到脚本直读 SQLite）
 ├── remedy.py        # 每日兜底补签脚本（cron 调用，窗口内补救+QQ邮件）
 ├── check_daily.py   # 已弃用：原 08:00 纯告警，已由 remedy.py 替代
 ├── templates/        # Jinja2 模板（响应式设计系统）
