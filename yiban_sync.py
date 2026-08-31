@@ -110,6 +110,7 @@ def trigger_sign_stream(phone: Optional[str] = None, test_mode: bool = False) ->
 
     env = os.environ.copy()
     env["APP_ENV"] = "prod"
+    env["YIBAN_FORCE"] = "1"  # 后台「手动签到」：跳过本地时间窗检查，直接实签
     if test_mode:
         env["TEST_LOGIN"] = "true"
     if phone:
