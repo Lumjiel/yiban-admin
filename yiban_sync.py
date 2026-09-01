@@ -169,7 +169,7 @@ def parse_line(line: str) -> Optional[dict]:
     # core.py 未命中任何错误正则时的最终输出（防御性检查失败关键词）
     if "签到结果: " in line:
         msg = line.split("签到结果:")[-1].strip()
-        if any(k in msg for k in ERR_KEYWORDS_SIGN + ERR_KEYWORDS_AUTH):
+        if any(k in msg for k in ERR_KEYWORDS_FAIL + ERR_KEYWORDS_SIGN + ERR_KEYWORDS_AUTH):
             return {"status": "fail", "message": msg}
         return {"status": "success", "message": msg}
     # 失败类过程行（core.py 打印后可能重试，成功会被上面的终态行覆盖）
