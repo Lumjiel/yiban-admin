@@ -6,7 +6,7 @@
 <div class="card" style="max-width:600px;">
     <h2>📊 通知概览</h2>
     <div class="stats-grid" style="margin-bottom:0;">
-        <div class="stat-item"><div class="stat-label">汇总邮件收件人</div><div style="font-size:14px;margin-top:4px;">{{ notify.summary_recipient or first_user_qq or '未配置' }}</div></div>
+        <div class="stat-item"><div class="stat-label">汇总邮件收件人</div><div style="font-size:14px;margin-top:4px;">{{ effective_recipient or '未配置' }}</div></div>
         <div class="stat-item"><div class="stat-label">Server酱</div><div style="font-size:14px;margin-top:4px;color:{{ 'var(--success)' if notify and notify.serverchan_enable else 'var(--text-faint)' }}">{{ '✓ 已启用' if notify and notify.serverchan_enable else '✗ 未启用' }}</div></div>
         <div class="stat-item"><div class="stat-label">单独成功通知用户</div><div style="font-size:14px;margin-top:4px;">{{ success_notify_count }} 人</div></div>
         <div class="stat-item"><div class="stat-label">邮件通知</div><div style="font-size:14px;margin-top:4px;color:{{ 'var(--success)' if notify and notify.email_enable else 'var(--text-faint)' }}">{{ '✓ 已启用' if notify and notify.email_enable else '✗ 未启用' }}</div></div>
@@ -30,8 +30,8 @@
         </div>
 
         <label style="margin-top:24px;font-size:14px;color:#cbd5e1;">汇总通知</label>
-        <label>汇总邮件收件人（QQ号，留空则发给第一个用户）</label>
-        <input type="text" name="summary_recipient" value="{{ notify.summary_recipient if notify else '' }}" placeholder="默认第一个用户" autocomplete="off">
+        <label>汇总邮件收件人（QQ号，留空则发给 18362071562 的 QQ）</label>
+        <input type="text" name="summary_recipient" value="{{ notify.summary_recipient if notify else '' }}" placeholder="留空则回退 18362071562" autocomplete="off">
         <label>Server酱 SendKey</label>
         <input type="text" name="serverchan_key" value="{{ notify.serverchan_key if notify else '' }}" placeholder="SCTxxxxxxxxxxxxxxxxxxx" autocomplete="off">
         <div class="checkbox-row">

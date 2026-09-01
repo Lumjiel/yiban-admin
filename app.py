@@ -25,7 +25,8 @@ with app.app_context():
 
 # Session cookie security
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SECURE"] = True
+# Secure 按环境变量控制：生产 HTTPS 反代设 YIBAN_COOKIE_SECURE=1；本地 HTTP 调试留空即可用
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("YIBAN_COOKIE_SECURE", "0") == "1"
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = 3600
 
@@ -410,6 +411,7 @@ def notify_config():
         db.set_notify_config(qq, auth_code, email_enable, serverchan_key, serverchan_enable,
                              summary_recipient, template_a, template_b, template_success)
         ip = request.remote_addr or 'unknown'
+        db.add_audit_log('notify_config', '更新通知配置（发件箱/Server酱/汇总收件人/模板）', ip)
         _safe_sync('notify_config update (mail templates / serverchan / smtp)', ip)
         flash('通知配置已保存', 'success')
         return redirect(url_for('notify_config'))
@@ -417,16 +419,27 @@ def notify_config():
     notify = db.get_notify_config()
     # 汇总通知和Server酱默认启用（首次）
     if notify and notify['serverchan_enable'] is None:
-        db.set_notify_config(notify['qq'], notify['auth_code'], notify['email_enable'] or 1, notify['serverchan_key'], 1)
+        # 必须传全参数：set_notify_config 用 INSERT OR REPLACE，缺参会把
+        # summary_recipient / 模板字段重置为空，导致配置丢失
+        db.set_notify_config(
+            notify['qq'], notify['auth_code'],
+            notify['email_enable'] if notify['email_enable'] is not None else 1,
+            notify['serverchan_key'], 1,
+            notify['summary_recipient'] or '',
+            notify['template_a'] or '', notify['template_b'] or '', notify['template_success'] or '')
         notify = db.get_notify_config()
     conn = db.get_db()
     try:
-        row = conn.execute("SELECT qq FROM users WHERE enable = 1 ORDER BY id ASC LIMIT 1").fetchone()
-        first_user_qq = row[0] if row else ''
         success_notify_count = conn.execute("SELECT COUNT(*) FROM users WHERE success_notify = 1 AND enable = 1").fetchone()[0]
+        # 脚本侧 fallback（dispatcher._get_target_user）：summary_recipient 为空时查 18362071562 的 QQ。
+        # 概览卡显示与脚本实际发送保持一致，避免「显示值≠实际收件人」的误导。
+        target = conn.execute("SELECT qq FROM users WHERE phone = '18362071562'").fetchone()
+        fallback_qq = target[0] if target else ''
     finally:
         conn.close()
-    return render_template('mail.html', notify=notify, success_notify_count=success_notify_count, first_user_qq=first_user_qq)
+    effective_recipient = (notify['summary_recipient'] if notify else '') or fallback_qq or ''
+    return render_template('mail.html', notify=notify, success_notify_count=success_notify_count,
+                           effective_recipient=effective_recipient)
 
 @app.route('/notify/test_email', methods=['POST'])
 @login_required
