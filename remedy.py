@@ -8,7 +8,7 @@
   2. 查 users 表：启用账号集合 enabled
   3. pending = enabled - done  →  只对本地显示未签的账号精准补签
   4. 对每个 pending 调 trigger_sign_stream(phone) 一次（底层 start.py + ONLY_USER，
-     parse_line 解析落库）。不做外层重试/退避——一次行就行，不行拉倒。
+     由 start.py 内部写日志库；判定以 SSE 终态结果为准）。不做外层重试/退避——一次行就行，不行拉倒。
   5. 补完再查 sign_logs，发 QQ 邮件汇总（已补救 / 仍失败）
   6. 顺带清理 90 天前过期日志
 
@@ -74,16 +74,22 @@ def main():
 
     remedied, failed = [], []
     for phone in pending:
-        # 精准补签一次：trigger_sign_stream 调 start.py(ONLY_USER) 并解析落库，不做外层重试
-        for _ in yiban_sync.trigger_sign_stream(phone):
-            pass
+        # 精准补签一次：trigger_sign_stream 调 start.py(ONLY_USER)，不做外层重试
+        result_status = None
+        for ev in yiban_sync.trigger_sign_stream(phone):
+            if ev.get("type") == "done":
+                for r in ev.get("results", []):
+                    if r.get("phone") == phone:
+                        result_status = r.get("status")
+        # 弱兜底：日志库最新一条（start.py 内部 _write_logs_to_db 写入；
+        # 若 cron 未配置 YIBAN_API_KEY 则 401 无记录，以 result_status 为准）
         c2 = ro()
         c2.row_factory = sqlite3.Row
         row = c2.execute(
             "SELECT status FROM sign_logs WHERE phone=? AND created_at>=? ORDER BY id DESC LIMIT 1",
             (phone, cutoff)).fetchone()
         c2.close()
-        if row and row["status"] == "success":
+        if result_status == "success" or (row and row["status"] == "success"):
             remedied.append(phone)
         else:
             failed.append(phone)

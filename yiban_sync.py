@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from typing import Optional, Generator
 
-from db import get_all_users, get_notify_config, add_sign_log, sanitize_str
+from db import get_all_users, get_notify_config, sanitize_str
 
 # 错误关键词（与 yiban/sign/core.py 保持一致）
 ERR_KEYWORDS_SIGN = ["Get Night Attendance Sign Tasks Error", "校本化", "未登录或登录已经超时"]
@@ -119,50 +119,63 @@ def trigger_sign_stream(phone: Optional[str] = None, test_mode: bool = False) ->
     cmd = [SERVER_PYTHON, "-u", "scripts/start.py"]
     yield {"type": "info", "message": "执行: " + " ".join(cmd)}
 
+    # results 按手机号合并（后行覆盖），与 core.py 的最终结果对齐
+    results = {}  # phone -> {"status": ..., "message": ...}
     try:
         proc = subprocess.Popen(
             cmd, cwd=SERVER_PATH, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
         )
-        results = []
         for line in iter(proc.stdout.readline, ""):
             line = line.rstrip("\n")
             if not line:
                 continue
             yield {"type": "log", "message": line}
-            r = parse_line(line, batch_id)
+            r = parse_line(line)
             if r:
-                results.append(r)
-        proc.wait(timeout=10)
-        yield {"type": "done", "results": results, "batch_id": batch_id, "returncode": proc.returncode}
+                results[extract_phone(line) or "unknown"] = r
+        # stdout EOF ≈ 子进程退出；wait 仅为保险（读完整输出再收尾，避免 10s 硬超时截断）
+        proc.wait(timeout=600)
+        yield {"type": "done",
+               "results": [{"phone": p, **r} for p, r in results.items()],
+               "batch_id": batch_id, "returncode": proc.returncode}
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        yield {"type": "error", "message": "执行超时（>600s），已终止"}
+        yield {"type": "done",
+               "results": [{"phone": p, **r} for p, r in results.items()],
+               "batch_id": batch_id, "truncated": True}
     except Exception as e:
         yield {"type": "error", "message": str(e)}
         yield {"type": "done", "results": []}
 
 
-def parse_line(line: str, batch_id: str) -> Optional[dict]:
-    """解析签到输出行，写入日志表"""
-    if any(k in line for k in ERR_KEYWORDS_FAIL):
-        phone = extract_phone(line)
-        add_sign_log(phone, "fail", line, batch_id)
-        return {"phone": phone, "status": "fail", "message": line}
+def parse_line(line: str) -> Optional[dict]:
+    """解析签到输出行 → 前端统计条目。
 
-    if "签到成功:" in line or "签到成功]" in line:
-        phone = extract_phone(line)
-        if "签到成功:" in line:
-            msg = line.split("签到成功:")[-1].strip()
-        else:
-            msg = line.split("签到成功]")[-1].strip()
-        is_fail = any(k in msg for k in ERR_KEYWORDS_SIGN + ERR_KEYWORDS_AUTH)
-        status = "fail" if is_fail else "success"
-        add_sign_log(phone, status, msg, batch_id)
-        return {"phone": phone, "status": status, "message": msg}
-
-    if "无需签到" in line or "在跳过列表" in line:
-        phone = extract_phone(line)
-        add_sign_log(phone, "skip", line, batch_id)
-        return {"phone": phone, "status": "skip", "message": line}
-
+    只解析 core.py 的**终态行**，且**不再写库**（日志写库统一由 start.py 内部
+    `_write_logs_to_db()` 完成，根治双写）。重试型失败（先打「错误类型」行、
+    后重试成功）由 trigger_sign_stream 按手机号合并、后行覆盖处理。
+    """
+    if "在跳过列表" in line or "不在仅测试列表" in line:
+        return {"status": "skip"}
+    if "结果: 跳过" in line:
+        return {"status": "skip", "message": line.split("结果: 跳过")[-1].strip()}
+    if "结果: 成功" in line:
+        return {"status": "success", "message": line.split("结果: 成功")[-1].strip()}
+    # core.py 未命中任何错误正则时的最终输出（防御性检查失败关键词）
+    if "签到结果: " in line:
+        msg = line.split("签到结果:")[-1].strip()
+        if any(k in msg for k in ERR_KEYWORDS_SIGN + ERR_KEYWORDS_AUTH):
+            return {"status": "fail", "message": msg}
+        return {"status": "success", "message": msg}
+    # 失败类过程行（core.py 打印后可能重试，成功会被上面的终态行覆盖）
+    if "错误类型: " in line or "出现错误: " in line:
+        msg = line.split("] ", 1)[-1] if "] " in line else line
+        return {"status": "fail", "message": msg}
     return None
 
 
