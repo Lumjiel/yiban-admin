@@ -93,7 +93,7 @@
                 <td data-label="手机号">{{ log.phone }}</td>
                 <td data-label="状态"><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
                 <td data-label="详情" class="wrap">{{ log.message }}</td>
-                <td data-label="" class="no-label" style="width:44px"><button class="btn btn-sm btn-danger" onclick="deleteLog({{ log.id }}, this)">✕</button></td>
+                <td data-label="" class="no-label" style="width:44px"><button class="btn btn-sm btn-danger" onclick="deleteLog(this)" data-url="{{ url_for('api_delete_log', log_id=log.id) }}">✕</button></td>
             </tr>
         {% endfor %}
         {% if not recent_logs %}
@@ -107,9 +107,11 @@
 
 {% block scripts %}
 <script>
-function deleteLog(logId, btn) {
+function deleteLog(btn) {
     if (!confirm('删除这条记录?')) return;
-    fetch("{{ url_for('api_delete_log', log_id=0) }}".replace('/0/', '/' + logId + '/'), {method:'POST', headers:{'X-CSRFToken': csrfToken}})
+    const url = btn.dataset.url;
+    if (!url) return;
+    fetch(url, {method:'POST', headers:{'X-CSRFToken': csrfToken}})
         .then(r => r.json()).then(d => { if (d.ok) { btn.closest('tr').remove(); toast('已删除', 'success'); } });
 }
 
